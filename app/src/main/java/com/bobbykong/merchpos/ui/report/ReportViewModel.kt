@@ -1,5 +1,7 @@
 package com.bobbykong.merchpos.ui.report
 
+import com.bobbykong.merchpos.data.model.isLowStock
+import com.bobbykong.merchpos.data.model.isSoldOut
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bobbykong.merchpos.data.PosRepository
@@ -38,10 +40,15 @@ data class ReportUiState(
 class ReportViewModel(private val repository: PosRepository) : ViewModel() {
     val eventSelection = EventSelection(repository, viewModelScope)
 
+    /** Only products to worry about: sold out first, then low stock (fewest left first). */
+    private val needsRestock = repository.activeProducts.map { products ->
+        products.filter { it.isSoldOut || it.isLowStock }.sortedBy { it.stockQty }
+    }
+
     val uiState: StateFlow<ReportUiState> =
         eventSelection.selected.map { it?.id }.distinctUntilChanged().flatMapLatest { eventId ->
             if (eventId == null) {
-                repository.activeProducts.map { ReportUiState(stock = it) }
+                needsRestock.map { ReportUiState(stock = it) }
             } else {
                 // combine() takes at most 5 flows, so two are joined first
                 val totals = combine(repository.salesSummary(eventId), repository.discountsAndGifts(eventId)) { a, b -> a to b }
@@ -50,7 +57,7 @@ class ReportViewModel(private val repository: PosRepository) : ViewModel() {
                     repository.paymentTotals(eventId),
                     repository.dailySales(eventId),
                     repository.bestSellers(eventId),
-                    repository.activeProducts,
+                    needsRestock,
                 ) { (summary, extras), payments, daily, bestSellers, stock ->
                     ReportUiState(summary, extras, payments, daily, bestSellers, stock)
                 }

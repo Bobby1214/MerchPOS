@@ -55,7 +55,7 @@ data class ProductPart(
 )
 
 /** Stock at or below this number shows a low-stock warning. */
-const val LOW_STOCK_THRESHOLD = 3
+const val LOW_STOCK_THRESHOLD = 2
 
 val Product.isSoldOut: Boolean get() = stockQty <= 0
 val Product.isLowStock: Boolean get() = stockQty in 1..LOW_STOCK_THRESHOLD

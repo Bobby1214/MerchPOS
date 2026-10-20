@@ -109,8 +109,8 @@ fun ReportScreen(
         }
 
         item {
-            Section("Stock left (now)") {
-                if (state.stock.isEmpty()) Text("No active products")
+            Section("Sold out & low stock (now)") {
+                if (state.stock.isEmpty()) Text("All good: nothing is sold out or low")
                 state.stock.forEach { product ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         Text(product.name, modifier = Modifier.weight(1f))

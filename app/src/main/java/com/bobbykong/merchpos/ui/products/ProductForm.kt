@@ -11,6 +11,7 @@ data class ProductForm(
     val price: String = "",
     val stock: String = "",
     val isActive: Boolean = true,
+    val imagePath: String? = null,
 ) {
     val priceSen: Int? get() = parseRmToSen(price)
     val stockQty: Int? get() = stock.trim().toIntOrNull()?.takeIf { it >= 0 }
@@ -35,6 +36,7 @@ data class ProductForm(
                     price = formatSenPlain(product.priceSen),
                     stock = product.stockQty.toString(),
                     isActive = product.isActive,
+                    imagePath = product.imagePath,
                 )
             }
     }

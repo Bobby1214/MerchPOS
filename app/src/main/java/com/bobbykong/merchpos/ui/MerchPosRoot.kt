@@ -65,7 +65,7 @@ fun MerchPosRoot() {
         when (tab) {
             Tab.SELL -> SellScreen(snackbarHostState, modifier)
             Tab.PRODUCTS -> ProductsScreen(modifier)
-            Tab.ORDERS -> OrdersScreen(modifier)
+            Tab.ORDERS -> OrdersScreen(snackbarHostState, modifier)
             Tab.REPORT -> ReportScreen(modifier)
             Tab.EVENTS -> EventsScreen(snackbarHostState, modifier)
         }

@@ -20,6 +20,9 @@ interface EventDao {
     @Insert
     suspend fun insert(event: Event): Long
 
+    @Query("DELETE FROM events WHERE id = :id")
+    suspend fun delete(id: Int)
+
     @Query("UPDATE events SET end_date = :endDate WHERE id = :id AND end_date IS NULL")
     suspend fun end(id: Int, endDate: Long): Int
 }

@@ -6,7 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-enum class MovementReason { INITIAL, SALE, CANCEL, ADJUST }
+enum class MovementReason { INITIAL, SALE, CANCEL, ADJUST, EDIT, EVENT_DELETED }
 
 /** The "bank statement" for stock: every change to products.stock_qty gets one row here. */
 @Entity(

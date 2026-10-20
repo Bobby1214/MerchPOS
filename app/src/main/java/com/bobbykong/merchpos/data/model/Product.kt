@@ -12,6 +12,7 @@ data class Product(
     val category: String,
     @ColumnInfo(name = "price_sen") val priceSen: Int,
     @ColumnInfo(name = "stock_qty") val stockQty: Int,
+    // File name inside the app's product_images folder (not a full path, so backups work on another phone)
     @ColumnInfo(name = "image_path") val imagePath: String? = null,
     // Soft delete: inactive products can't be sold, but old orders still point to them
     @ColumnInfo(name = "is_active") val isActive: Boolean = true,

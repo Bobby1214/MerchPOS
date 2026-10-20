@@ -48,6 +48,12 @@ fun ReportScreen(
                     Text("Total sales", style = MaterialTheme.typography.labelLarge)
                     Text(formatRm(state.summary.totalSen), style = MaterialTheme.typography.headlineMedium)
                     Text("${plural(state.summary.orderCount, "order")} · ${plural(state.itemsSold, "item")} sold")
+                    if (state.extras.discountSen > 0) {
+                        Text("Discounts & bundles: −${formatRm(state.extras.discountSen)}")
+                    }
+                    if (state.extras.giftQty > 0) {
+                        Text("Gifts: ${plural(state.extras.giftQty, "item")}, worth ${formatRm(state.extras.giftValueSen)}")
+                    }
                 }
             }
         }
@@ -73,7 +79,7 @@ fun ReportScreen(
         }
 
         item {
-            Section("Best sellers") {
+            Section("Best sellers (before discounts)") {
                 if (state.bestSellers.isEmpty()) Text("No sales yet")
                 state.bestSellers.forEachIndexed { index, seller ->
                     LabelValueRow("${index + 1}. ${seller.name}", "${seller.qtySold} sold · ${formatRm(seller.revenueSen)}")

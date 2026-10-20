@@ -33,7 +33,7 @@ data class OrderItem(
     val qty: Int,
     // Price snapshot: changing the product price later doesn't change old orders
     @ColumnInfo(name = "unit_price_sen") val unitPriceSen: Int,
-    // Phase 2 (gift items)
+    // Gift: still takes stock, charged RM0, but keeps the normal price so reports show its value
     @ColumnInfo(name = "is_gift") val isGift: Boolean = false,
 )
 

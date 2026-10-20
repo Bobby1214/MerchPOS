@@ -2,12 +2,22 @@ package com.bobbykong.merchpos.ui.sell
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bobbykong.merchpos.data.CartItem
 import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
+import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.Event
+import com.bobbykong.merchpos.data.model.OrderDiscount
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.Product
+import com.bobbykong.merchpos.domain.CartKey
+import com.bobbykong.merchpos.domain.PriceBreakdown
+import com.bobbykong.merchpos.domain.PriceCalculator
+import com.bobbykong.merchpos.domain.PriceLine
+import com.bobbykong.merchpos.domain.minusOne
+import com.bobbykong.merchpos.domain.plusOne
+import com.bobbykong.merchpos.domain.qtyOf
+import com.bobbykong.merchpos.domain.toCartItems
+import com.bobbykong.merchpos.domain.toggleGift
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,64 +27,84 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-data class CartLine(val product: Product, val qty: Int) {
-    val lineTotalSen: Int get() = product.priceSen * qty
+data class CartLine(val product: Product, val qty: Int, val isGift: Boolean) {
+    val key: CartKey get() = CartKey(product.id, isGift)
 }
 
 data class SellUiState(
+    // True until the database answers, so the screen doesn't flash "No event running" at start-up
+    val loading: Boolean = true,
     val event: Event? = null,
     val products: List<Product> = emptyList(),
     val categories: List<String> = emptyList(),
     val selectedCategory: String? = null,
     val cart: List<CartLine> = emptyList(),
+    val bundles: List<BundleDeal> = emptyList(),
 ) {
     val visibleProducts: List<Product>
         get() = if (selectedCategory == null) products else products.filter { it.category == selectedCategory }
-    val totalSen: Int get() = cart.sumOf { it.lineTotalSen }
     val itemCount: Int get() = cart.sumOf { it.qty }
+    val price: PriceBreakdown = priceWith(null)
 
-    fun qtyInCart(productId: Int): Int = cart.firstOrNull { it.product.id == productId }?.qty ?: 0
+    fun priceWith(discount: OrderDiscount?): PriceBreakdown = PriceCalculator.calculate(
+        cart.map { PriceLine(it.product.category, it.product.priceSen, it.qty, it.isGift) },
+        bundles,
+        discount,
+    )
+
+    fun qtyInCart(productId: Int): Int = cart.filter { it.product.id == productId }.sumOf { it.qty }
 }
 
 class SellViewModel(private val repository: PosRepository) : ViewModel() {
-    // productId -> qty. A Map keeps one entry per product, in the order they were added.
-    private val cart = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    private val cart = MutableStateFlow<Map<CartKey, Int>>(emptyMap())
     private val category = MutableStateFlow<String?>(null)
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
     val uiState: StateFlow<SellUiState> =
-        combine(repository.openEvent, repository.activeProducts, cart, category) { event, products, cart, category ->
+        combine(
+            repository.openEvent,
+            repository.activeProducts,
+            repository.activeBundles,
+            cart,
+            category,
+        ) { event, products, bundles, cart, category ->
             val byId = products.associateBy { it.id }
             val categories = products.map { it.category }.distinct()
+            // Drop deactivated products, and never show more than is in stock (paid + gift together)
+            val left = mutableMapOf<Int, Int>()
+            val lines = cart.mapNotNull { (key, qty) ->
+                val product = byId[key.productId] ?: return@mapNotNull null
+                val remaining = left.getOrPut(product.id) { product.stockQty }
+                val shown = qty.coerceAtMost(remaining)
+                left[product.id] = remaining - shown
+                CartLine(product, shown, key.isGift).takeIf { shown > 0 }
+            }
             SellUiState(
+                loading = false,
                 event = event,
                 products = products,
                 categories = categories,
                 selectedCategory = category?.takeIf { it in categories },
-                // Drop products that were deactivated, and never show more than is in stock
-                cart = cart.mapNotNull { (id, qty) ->
-                    byId[id]?.let { CartLine(it, qty.coerceAtMost(it.stockQty)) }
-                }.filter { it.qty > 0 },
+                cart = lines,
+                bundles = bundles,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SellUiState())
 
-    fun add(product: Product) {
-        val inCart = cart.value[product.id] ?: 0
-        if (inCart >= product.stockQty) {
+    fun add(product: Product) = increase(CartKey(product.id, isGift = false), product)
+
+    fun increase(key: CartKey, product: Product) {
+        if (cart.value.qtyOf(product.id) >= product.stockQty) {
             _message.value = "Only ${product.stockQty} ${product.name} in stock"
             return
         }
-        cart.update { it + (product.id to inCart + 1) }
+        cart.update { it.plusOne(key) }
     }
 
-    fun decrease(productId: Int) {
-        cart.update {
-            val qty = (it[productId] ?: return@update it) - 1
-            if (qty <= 0) it - productId else it + (productId to qty)
-        }
-    }
+    fun decrease(key: CartKey) = cart.update { it.minusOne(key) }
+
+    fun toggleGift(key: CartKey) = cart.update { it.toggleGift(key) }
 
     fun clearCart() {
         cart.value = emptyMap()
@@ -84,11 +114,11 @@ class SellViewModel(private val repository: PosRepository) : ViewModel() {
         this.category.value = category
     }
 
-    fun checkout(payment: PaymentMethod) {
-        val items = uiState.value.cart.map { CartItem(it.product.id, it.qty) }
+    fun checkout(payment: PaymentMethod, discount: OrderDiscount?) {
+        val items = uiState.value.cart.associate { it.key to it.qty }.toCartItems()
         viewModelScope.launch {
             try {
-                val orderId = repository.checkout(items, payment)
+                val orderId = repository.checkout(items, payment, discount)
                 cart.value = emptyMap()
                 _message.value = "Order #$orderId saved"
             } catch (e: PosException) {

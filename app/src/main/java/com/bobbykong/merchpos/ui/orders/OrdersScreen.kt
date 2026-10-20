@@ -11,9 +11,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bobbykong.merchpos.data.model.DiscountType
 import com.bobbykong.merchpos.data.model.Order
 import com.bobbykong.merchpos.data.model.OrderStatus
 import com.bobbykong.merchpos.ui.AppViewModelProvider
@@ -34,13 +37,23 @@ import com.bobbykong.merchpos.util.formatRm
 
 @Composable
 fun OrdersScreen(
+    snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
     viewModel: OrdersViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val events by viewModel.eventSelection.events.collectAsStateWithLifecycle()
     val selected by viewModel.eventSelection.selected.collectAsStateWithLifecycle()
     val orders by viewModel.orders.collectAsStateWithLifecycle()
+    val editState by viewModel.editState.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
     var toCancel by remember { mutableStateOf<Order?>(null) }
+
+    LaunchedEffect(message) {
+        message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.messageShown()
+        }
+    }
 
     LazyColumn(
         modifier,
@@ -52,9 +65,11 @@ fun OrdersScreen(
             item { Text("No orders for this event yet.", modifier = Modifier.padding(top = 16.dp)) }
         }
         items(orders, key = { it.order.id }) { item ->
-            OrderCard(item, onCancel = { toCancel = item.order })
+            OrderCard(item, onEdit = { viewModel.startEdit(item) }, onCancel = { toCancel = item.order })
         }
     }
+
+    editState?.let { EditOrderDialog(it, viewModel) }
 
     toCancel?.let { order ->
         AlertDialog(
@@ -75,7 +90,7 @@ fun OrdersScreen(
 }
 
 @Composable
-private fun OrderCard(item: OrderWithLines, onCancel: () -> Unit) {
+private fun OrderCard(item: OrderWithLines, onEdit: () -> Unit, onCancel: () -> Unit) {
     val order = item.order
     val cancelled = order.status == OrderStatus.CANCELLED
     Card(Modifier.fillMaxWidth()) {
@@ -84,7 +99,7 @@ private fun OrderCard(item: OrderWithLines, onCancel: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("#${order.id} · ${order.paymentMethod.label}", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        formatDateTime(order.createdAt),
+                        formatDateTime(order.createdAt) + if (order.isEdited) " · edited" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -96,12 +111,24 @@ private fun OrderCard(item: OrderWithLines, onCancel: () -> Unit) {
                 )
             }
             item.lines.forEach { line ->
-                LabelValueRow("${line.qty} × ${line.productName}", formatRm(line.lineTotalSen))
+                if (line.isGift) {
+                    LabelValueRow("${line.qty} × ${line.productName} (gift)", "FREE")
+                } else {
+                    LabelValueRow("${line.qty} × ${line.productName}", formatRm(line.lineTotalSen))
+                }
+            }
+            if (order.bundleDiscountSen > 0) LabelValueRow("Bundle savings", "−" + formatRm(order.bundleDiscountSen))
+            if (order.discountSen > 0) {
+                val label = order.discount?.let { if (it.type == DiscountType.PERCENT) "Discount ${it.value}%" else "Discount" }
+                LabelValueRow(label ?: "Discount", "−" + formatRm(order.discountSen))
             }
             if (cancelled) {
                 Text("CANCELLED", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
             } else {
-                TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.End)) { Text("Cancel order") }
+                Row(Modifier.align(Alignment.End)) {
+                    TextButton(onClick = onEdit) { Text("Edit") }
+                    TextButton(onClick = onCancel) { Text("Cancel order") }
+                }
             }
         }
     }

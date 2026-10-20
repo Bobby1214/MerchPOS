@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.bobbykong.merchpos.data.PosRepository
 import com.bobbykong.merchpos.data.model.BestSeller
 import com.bobbykong.merchpos.data.model.DailySales
+import com.bobbykong.merchpos.data.model.DiscountGiftSummary
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.PaymentTotal
 import com.bobbykong.merchpos.data.model.Product
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.stateIn
 
 data class ReportUiState(
     val summary: SalesSummary = SalesSummary(orderCount = 0, totalSen = 0),
+    val extras: DiscountGiftSummary = DiscountGiftSummary(discountSen = 0, giftQty = 0, giftValueSen = 0),
     val payments: List<PaymentTotal> = emptyList(),
     val daily: List<DailySales> = emptyList(),
     val bestSellers: List<BestSeller> = emptyList(),
@@ -41,14 +43,16 @@ class ReportViewModel(private val repository: PosRepository) : ViewModel() {
             if (eventId == null) {
                 repository.activeProducts.map { ReportUiState(stock = it) }
             } else {
+                // combine() takes at most 5 flows, so two are joined first
+                val totals = combine(repository.salesSummary(eventId), repository.discountsAndGifts(eventId)) { a, b -> a to b }
                 combine(
-                    repository.salesSummary(eventId),
+                    totals,
                     repository.paymentTotals(eventId),
                     repository.dailySales(eventId),
                     repository.bestSellers(eventId),
                     repository.activeProducts,
-                ) { summary, payments, daily, bestSellers, stock ->
-                    ReportUiState(summary, payments, daily, bestSellers, stock)
+                ) { (summary, extras), payments, daily, bestSellers, stock ->
+                    ReportUiState(summary, extras, payments, daily, bestSellers, stock)
                 }
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReportUiState())

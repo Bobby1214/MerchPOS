@@ -3,6 +3,7 @@ package com.bobbykong.merchpos.data.dao
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import com.bobbykong.merchpos.data.model.Order
 import com.bobbykong.merchpos.data.model.OrderItem
 import com.bobbykong.merchpos.data.model.OrderLine
@@ -15,6 +16,22 @@ interface OrderDao {
 
     @Insert
     suspend fun insertItems(items: List<OrderItem>)
+
+    @Update
+    suspend fun updateOrder(order: Order)
+
+    @Query("DELETE FROM order_items WHERE order_id = :orderId")
+    suspend fun deleteItems(orderId: Int)
+
+    @Query("SELECT * FROM orders WHERE event_id = :eventId")
+    suspend fun getForEvent(eventId: Int): List<Order>
+
+    @Query("SELECT COUNT(*) FROM orders WHERE event_id = :eventId")
+    suspend fun countForEvent(eventId: Int): Int
+
+    // order_items are removed too (ON DELETE CASCADE)
+    @Query("DELETE FROM orders WHERE event_id = :eventId")
+    suspend fun deleteForEvent(eventId: Int)
 
     @Query("SELECT * FROM orders WHERE id = :id")
     suspend fun getById(id: Int): Order?

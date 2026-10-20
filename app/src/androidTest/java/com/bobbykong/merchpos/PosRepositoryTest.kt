@@ -7,7 +7,10 @@ import com.bobbykong.merchpos.data.AppDatabase
 import com.bobbykong.merchpos.data.CartItem
 import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
+import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.DiscountType
 import com.bobbykong.merchpos.data.model.MovementReason
+import com.bobbykong.merchpos.data.model.OrderDiscount
 import com.bobbykong.merchpos.data.model.OrderStatus
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import kotlinx.coroutines.flow.first
@@ -129,5 +132,123 @@ class PosRepositoryTest {
         repo.endEvent(first)
         repo.startEvent("Day 2")
         assertEquals(2, repo.events.first().size)
+    }
+
+    @Test
+    fun giftsTakeStockButCostNothing() = runBlocking {
+        val eventId = repo.startEvent("Comic Fiesta")
+        val badge = repo.addProduct("Badge", "Badge", 800, 10)
+
+        val orderId = repo.checkout(listOf(CartItem(badge, 2), CartItem(badge, 1, isGift = true)), PaymentMethod.CASH)
+
+        assertEquals(7, stockOf(badge))
+        assertEquals(1600, db.orderDao().getById(orderId)!!.totalSen)
+        val extras = repo.discountsAndGifts(eventId).first()
+        assertEquals(1, extras.giftQty)
+        assertEquals(800L, extras.giftValueSen)
+        assertEquals(2, repo.bestSellers(eventId).first().single().qtySold)
+    }
+
+    @Test
+    fun checkoutSavesBundleAndDiscount() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val badge = repo.addProduct("Badge", "Badge", 800, 10)
+        repo.saveBundle(BundleDeal(name = "3 Badges", category = "Badge", qty = 3, priceSen = 2000))
+
+        val orderId = repo.checkout(listOf(CartItem(badge, 3)), PaymentMethod.CASH, OrderDiscount(DiscountType.FIXED, 500))
+
+        val order = db.orderDao().getById(orderId)!!
+        assertEquals(2400, order.subtotalSen)
+        assertEquals(400, order.bundleDiscountSen)
+        assertEquals(500, order.discountSen)
+        assertEquals(1500, order.totalSen)
+    }
+
+    @Test
+    fun editOrderAppliesOnlyTheDifference() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val badge = repo.addProduct("Badge", "Badge", 800, 10)
+        val stand = repo.addProduct("Stand", "Acrylic", 2500, 5)
+        val orderId = repo.checkout(listOf(CartItem(badge, 2)), PaymentMethod.CASH) // badge stock 8
+
+        // Price goes up later: the edited order must keep RM8 for badges
+        val product = db.productDao().getById(badge)!!
+        repo.updateProduct(product.copy(priceSen = 1000), stockBefore = product.stockQty)
+
+        repo.editOrder(
+            orderId,
+            listOf(CartItem(badge, 1), CartItem(stand, 1), CartItem(badge, 1, isGift = true)),
+            PaymentMethod.TOUCH_N_GO,
+            null,
+        )
+
+        assertEquals(8, stockOf(badge)) // still 2 badges in the order (1 paid + 1 gift)
+        assertEquals(4, stockOf(stand))
+        val order = db.orderDao().getById(orderId)!!
+        assertTrue(order.isEdited)
+        assertEquals(PaymentMethod.TOUCH_N_GO, order.paymentMethod)
+        assertEquals(800 + 2500, order.totalSen)
+        assertEquals(MovementReason.EDIT to -1, db.stockMovementDao().getForProduct(stand).last().let { it.reason to it.changeQty })
+    }
+
+    @Test
+    fun editOrderLimitsAndRollsBack() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val badge = repo.addProduct("Badge", "Badge", 800, 3)
+        val orderId = repo.checkout(listOf(CartItem(badge, 2)), PaymentMethod.CASH) // stock 1
+
+        // Max is stock left + what the order already has = 1 + 2 = 3
+        assertFails { repo.editOrder(orderId, listOf(CartItem(badge, 4)), PaymentMethod.CASH, null) }
+        assertEquals(1, stockOf(badge))
+        repo.editOrder(orderId, listOf(CartItem(badge, 3)), PaymentMethod.CASH, null)
+        assertEquals(0, stockOf(badge))
+
+        // Deactivated: can reduce, can't increase
+        val product = db.productDao().getById(badge)!!
+        repo.updateProduct(product.copy(isActive = false), stockBefore = product.stockQty)
+        repo.editOrder(orderId, listOf(CartItem(badge, 1)), PaymentMethod.CASH, null)
+        assertEquals(2, stockOf(badge))
+        assertFails { repo.editOrder(orderId, listOf(CartItem(badge, 2)), PaymentMethod.CASH, null) }
+
+        assertFails { repo.editOrder(orderId, emptyList(), PaymentMethod.CASH, null) }
+        repo.cancelOrder(orderId)
+        assertFails { repo.editOrder(orderId, listOf(CartItem(badge, 1)), PaymentMethod.CASH, null) }
+    }
+
+    @Test
+    fun deleteEventRemovesOrdersAndReturnsStockOnce() = runBlocking {
+        val eventId = repo.startEvent("Practice run")
+        val badge = repo.addProduct("Badge", "Badge", 800, 10)
+        repo.checkout(listOf(CartItem(badge, 3)), PaymentMethod.CASH)
+        val cancelled = repo.checkout(listOf(CartItem(badge, 2)), PaymentMethod.CASH)
+        repo.cancelOrder(cancelled) // its 2 already went back
+        assertEquals(7, stockOf(badge))
+
+        repo.deleteEvent(eventId)
+
+        assertEquals(10, stockOf(badge))
+        assertTrue(repo.events.first().isEmpty())
+        assertEquals(0, repo.orderCountForEvent(eventId))
+        assertTrue(db.orderDao().getItems(cancelled).isEmpty())
+        assertEquals(MovementReason.EVENT_DELETED, db.stockMovementDao().getForProduct(badge).last().reason)
+        // A new event can start and sell normally afterwards
+        repo.startEvent("Comic Fiesta")
+        repo.checkout(listOf(CartItem(badge, 1)), PaymentMethod.CASH)
+        assertEquals(9, stockOf(badge))
+    }
+
+    @Test
+    fun exportRowsHaveOneRowPerLine() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val badge = repo.addProduct("Badge", "Badge", 800, 10)
+        repo.checkout(listOf(CartItem(badge, 2), CartItem(badge, 1, isGift = true)), PaymentMethod.DUITNOW_QR)
+
+        val rows = repo.exportRows()
+        assertEquals(2, rows.size)
+        assertEquals("Comic Fiesta", rows[0].eventName)
+        assertEquals("DUITNOW_QR", rows[0].paymentMethod)
+        assertEquals(1600, rows[0].lineTotalSen)
+        assertEquals(0, rows[1].lineTotalSen)
+        assertTrue(rows[1].isGift)
     }
 }

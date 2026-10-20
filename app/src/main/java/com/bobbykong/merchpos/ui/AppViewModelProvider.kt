@@ -15,11 +15,13 @@ import com.bobbykong.merchpos.ui.sell.SellViewModel
 object AppViewModelProvider {
     val Factory = viewModelFactory {
         initializer { SellViewModel(repository()) }
-        initializer { ProductsViewModel(repository()) }
+        initializer { ProductsViewModel(repository(), app()) }
         initializer { OrdersViewModel(repository()) }
         initializer { ReportViewModel(repository()) }
-        initializer { EventsViewModel(repository()) }
+        initializer { EventsViewModel(repository(), app().backupManager) }
     }
 }
 
-private fun CreationExtras.repository() = (this[APPLICATION_KEY] as MerchPosApplication).repository
+private fun CreationExtras.app() = this[APPLICATION_KEY] as MerchPosApplication
+
+private fun CreationExtras.repository() = app().repository

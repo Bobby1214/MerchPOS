@@ -103,7 +103,7 @@ class OrdersViewModel(private val repository: PosRepository) : ViewModel() {
             EditUiState(
                 draft = draft,
                 lines = lines,
-                addable = products.filter { it.isActive && draft.cart.qtyOf(it.id) < draft.maxQty(it) },
+                addable = products.filter { it.isActive && !it.isMaterial && draft.cart.qtyOf(it.id) < draft.maxQty(it) },
                 price = PriceCalculator.calculate(
                     lines.map { PriceLine(it.product.id, it.product.category, it.unitPriceSen, it.qty, it.isGift) },
                     bundles,

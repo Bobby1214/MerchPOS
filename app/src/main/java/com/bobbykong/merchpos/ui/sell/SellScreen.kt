@@ -122,7 +122,12 @@ fun SellScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.visibleProducts, key = { it.id }) { product ->
-                        ProductTile(product, inCart = state.qtyInCart(product.id), onClick = { viewModel.add(product) })
+                        ProductTile(
+                            product,
+                            inCart = state.qtyInCart(product.id),
+                            isSet = state.catalog.hasParts(product.id),
+                            onClick = { viewModel.add(product) },
+                        )
                     }
                 }
             }
@@ -153,7 +158,7 @@ fun SellScreen(
 }
 
 @Composable
-private fun ProductTile(product: Product, inCart: Int, onClick: () -> Unit) {
+private fun ProductTile(product: Product, inCart: Int, isSet: Boolean, onClick: () -> Unit) {
     Card(onClick = onClick, enabled = !product.isSoldOut) {
         Column {
             product.imagePath?.let {
@@ -172,7 +177,7 @@ private fun ProductTile(product: Product, inCart: Int, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(formatRm(product.priceSen), style = MaterialTheme.typography.titleSmall)
-                StockLabel(product)
+                StockLabel(product, setLabel = isSet)
                 if (inCart > 0) {
                     Text(
                         "In cart: $inCart",

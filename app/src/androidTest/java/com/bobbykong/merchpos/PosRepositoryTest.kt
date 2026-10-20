@@ -298,4 +298,58 @@ class PosRepositoryTest {
         repo.saveBundle(saved.bundle.copy(type = BundleType.CATEGORY, category = "Badge"), productIds = setOf(raiden))
         assertTrue(db.bundleDao().getActive().single().products.isEmpty())
     }
+
+    @Test
+    fun setTakesStockFromItsParts() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val a = repo.addProduct("Poster A", "Poster", 1500, 3)
+        val b = repo.addProduct("Poster B", "Poster", 1500, 2)
+        val set = repo.addProduct("Poster Set", "Set", 2500, stockQty = 99, parts = mapOf(a to 1, b to 1))
+        assertEquals(0, stockOf(set)) // stock typed for a set is ignored
+        assertEquals(2, repo.allProducts.first().first { it.id == set }.stockQty)
+
+        val order = repo.checkout(listOf(CartItem(set, 2)), PaymentMethod.CASH)
+        assertEquals(1, stockOf(a))
+        assertEquals(0, stockOf(b))
+        // Poster B is out, so no more sets
+        assertFails { repo.checkout(listOf(CartItem(set, 1)), PaymentMethod.CASH) }
+        assertEquals(1, stockOf(a))
+
+        // Edit 2 -> 1 set returns 1 of each part
+        repo.editOrder(order, listOf(CartItem(set, 1)), PaymentMethod.CASH, null)
+        assertEquals(2, stockOf(a))
+        assertEquals(1, stockOf(b))
+
+        // Change the recipe after the sale: cancel still returns what was really taken
+        repo.updateProduct(repo.allProducts.first().first { it.id == set }, stockBefore = 0, parts = mapOf(a to 2))
+        repo.cancelOrder(order)
+        assertEquals(3, stockOf(a))
+        assertEquals(2, stockOf(b))
+
+        // A part can't be deleted while a set uses it
+        assertFails { repo.deleteProduct(a) }
+    }
+
+    @Test
+    fun chekiTypesShareFilmAndMaterialIsNotSold() = runBlocking {
+        val eventId = repo.startEvent("Comic Fiesta")
+        val film = repo.addProduct("Instax film", "Material", 0, 5, isMaterial = true)
+        val normal = repo.addProduct("Normal cheki", "Cheki", 1000, 0, parts = mapOf(film to 1))
+        val service = repo.addProduct("Service cheki", "Cheki", 2500, 0, parts = mapOf(film to 1))
+
+        repo.checkout(listOf(CartItem(normal, 2), CartItem(service, 2)), PaymentMethod.CASH)
+        assertEquals(1, stockOf(film))
+        assertFails { repo.checkout(listOf(CartItem(normal, 1), CartItem(service, 1)), PaymentMethod.CASH) }
+        assertFails { repo.checkout(listOf(CartItem(film, 1)), PaymentMethod.CASH) }
+        assertEquals(1, stockOf(film))
+        // Movements are on the film, so the film's history shows every cheki
+        assertEquals(listOf(5, -4), db.stockMovementDao().getForProduct(film).map { it.changeQty })
+
+        // A material can't get parts, and nesting isn't allowed
+        assertFails { repo.addProduct("Bad", "X", 100, 0, isMaterial = true, parts = mapOf(film to 1)) }
+        assertFails { repo.addProduct("Nested", "X", 100, 0, parts = mapOf(normal to 1)) }
+
+        repo.deleteEvent(eventId)
+        assertEquals(5, stockOf(film))
+    }
 }

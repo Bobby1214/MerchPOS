@@ -12,10 +12,13 @@ import com.bobbykong.merchpos.data.model.OrderItem
 import com.bobbykong.merchpos.data.model.OrderStatus
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.Product
+import com.bobbykong.merchpos.data.model.ProductPart
 import com.bobbykong.merchpos.data.model.StockMovement
+import com.bobbykong.merchpos.domain.Catalog
 import com.bobbykong.merchpos.domain.PriceCalculator
 import com.bobbykong.merchpos.domain.PriceLine
 import com.bobbykong.merchpos.domain.toRule
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 
 /** A business rule was broken. The message is safe to show to the user. */
@@ -37,9 +40,15 @@ class PosRepository(
     private val movementDao = db.stockMovementDao()
     private val reportDao = db.reportDao()
     private val bundleDao = db.bundleDao()
+    private val partDao = db.productPartDao()
 
-    val allProducts = productDao.observeAll()
-    val activeProducts = productDao.observeActive()
+    /** Products + parts. Sets and cheki show how many can be made from their parts. */
+    val catalog = combine(productDao.observeAll(), partDao.observeAll()) { products, parts -> Catalog(products, parts) }
+    val allProducts = catalog.map { it.products }
+    /** Products that hold real stock (for the stock report). Sets are left out: their stock is their parts. */
+    val activeProducts = catalog.map { c ->
+        c.products.filter { it.isActive && !c.hasParts(it.id) }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, Product::category).thenBy(String.CASE_INSENSITIVE_ORDER, Product::name))
+    }
     val events = eventDao.observeAll()
     val openEvent = eventDao.observeOpen()
     val allBundles = bundleDao.observeAll()
@@ -69,21 +78,17 @@ class PosRepository(
     suspend fun orderCountForEvent(eventId: Int) = orderDao.countForEvent(eventId)
 
     /**
-     * Deletes the event and all its orders. Stock from COMPLETED orders goes back
+     * Deletes the event and all its orders. Stock the orders still hold goes back
      * (cancelled orders already returned theirs). Can't be undone.
      */
     suspend fun deleteEvent(eventId: Int) = db.withTransaction {
         val now = clock()
-        val returned = mutableMapOf<Int, Int>()
-        orderDao.getForEvent(eventId).filter { it.status == OrderStatus.COMPLETED }.forEach { order ->
-            orderDao.getItems(order.id).forEach { item ->
-                returned[item.productId] = (returned[item.productId] ?: 0) + item.qty
-            }
-        }
-        returned.forEach { (productId, qty) -> productDao.addStock(productId, qty) }
+        // Net movements = what these orders really took, parts included
+        val returned = movementDao.netForEvent(eventId).filter { it.changeQty < 0 }
+        returned.forEach { productDao.addStock(it.productId, -it.changeQty) }
         movementDao.insertAll(
-            returned.map { (productId, qty) ->
-                StockMovement(productId = productId, changeQty = qty, reason = MovementReason.EVENT_DELETED, createdAt = now)
+            returned.map {
+                StockMovement(productId = it.productId, changeQty = -it.changeQty, reason = MovementReason.EVENT_DELETED, createdAt = now)
             }
         )
         // Order lines go with their orders (CASCADE). Old movements keep their rows, with order_id set to NULL.
@@ -93,27 +98,57 @@ class PosRepository(
 
     // ---------- Products & bundles ----------
 
-    suspend fun addProduct(name: String, category: String, priceSen: Int, stockQty: Int, imagePath: String? = null): Int =
-        db.withTransaction {
-            val id = productDao.insert(
-                Product(name = name, category = category, priceSen = priceSen, stockQty = stockQty, imagePath = imagePath)
-            ).toInt()
-            if (stockQty > 0) {
-                movementDao.insert(
-                    StockMovement(productId = id, changeQty = stockQty, reason = MovementReason.INITIAL, createdAt = clock())
-                )
-            }
-            id
+    /**
+     * [parts] = part id → qty. A product with parts keeps no stock of its own, so [stockQty] is ignored.
+     */
+    suspend fun addProduct(
+        name: String,
+        category: String,
+        priceSen: Int,
+        stockQty: Int,
+        imagePath: String? = null,
+        isMaterial: Boolean = false,
+        parts: Map<Int, Int> = emptyMap(),
+    ): Int = db.withTransaction {
+        loadCatalog().partsError(0, isMaterial, parts)?.let { throw PosException(it) }
+        val stock = if (parts.isEmpty()) stockQty else 0
+        val id = productDao.insert(
+            Product(
+                name = name,
+                category = category,
+                priceSen = priceSen,
+                stockQty = stock,
+                imagePath = imagePath,
+                isMaterial = isMaterial,
+            )
+        ).toInt()
+        partDao.insertAll(parts.map { (partId, qty) -> ProductPart(productId = id, partId = partId, qty = qty) })
+        if (stock > 0) {
+            movementDao.insert(StockMovement(productId = id, changeQty = stock, reason = MovementReason.INITIAL, createdAt = clock()))
         }
+        id
+    }
 
     /**
      * [stockBefore] is the stock shown when the edit form opened. Only the difference the user typed
      * is applied, so a sale made while the form was open isn't overwritten.
+     * [parts] = the new parts list, or null to leave it as it is.
      */
-    suspend fun updateProduct(edited: Product, stockBefore: Int) = db.withTransaction {
+    suspend fun updateProduct(edited: Product, stockBefore: Int, parts: Map<Int, Int>? = null) = db.withTransaction {
         val current = productDao.getById(edited.id) ?: throw PosException("Product not found")
-        val newStock = (current.stockQty + edited.stockQty - stockBefore).coerceAtLeast(0)
+        val catalog = loadCatalog()
+        val newParts = parts ?: catalog.partsOf(edited.id).associate { it.partId to it.qty }
+        catalog.partsError(edited.id, edited.isMaterial, newParts)?.let { throw PosException(it) }
+
+        // A product with parts has no own stock: keep what's stored (0)
+        val newStock =
+            if (newParts.isNotEmpty()) current.stockQty
+            else (current.stockQty + edited.stockQty - stockBefore).coerceAtLeast(0)
         productDao.update(edited.copy(stockQty = newStock))
+        if (parts != null) {
+            partDao.clearFor(edited.id)
+            partDao.insertAll(parts.map { (partId, qty) -> ProductPart(productId = edited.id, partId = partId, qty = qty) })
+        }
         val change = newStock - current.stockQty
         if (change != 0) {
             movementDao.insert(
@@ -133,6 +168,9 @@ class PosRepository(
         val orders = orderDao.countOrdersWithProduct(productId)
         if (orders > 0) {
             throw PosException("${product.name} is in $orders order(s), so it can't be deleted. Deactivate it instead.")
+        }
+        loadCatalog().usedIn(productId).firstOrNull()?.let {
+            throw PosException("${product.name} is a part of ${it.name}. Remove it from ${it.name} first.")
         }
         movementDao.deleteForProduct(productId)
         productDao.delete(productId)
@@ -162,21 +200,18 @@ class PosRepository(
             val event = eventDao.getOpen() ?: throw PosException("Start an event before selling")
             val now = clock()
             val products = loadProducts(items.map { it.productId })
+            val catalog = loadCatalog()
 
             items.forEach { item ->
                 val product = products.getValue(item.productId)
                 if (!product.isActive) throw PosException("${product.name} is deactivated")
+                if (product.isMaterial) throw PosException("${product.name} is a material and can't be sold")
                 if (item.qty <= 0) throw PosException("Invalid quantity for ${product.name}")
             }
-            // Paid and gift lines of the same product both take stock
+            // Paid and gift lines of the same product both take stock. A set takes stock from its parts.
             val qtyByProduct = items.groupingBy { it.productId }.fold(0) { sum, item -> sum + item.qty }
-            qtyByProduct.forEach { (productId, qty) ->
-                val product = products.getValue(productId)
-                // Conditional UPDATE: stock can never go below 0
-                if (productDao.deductStock(productId, qty) == 0) {
-                    throw PosException("Only ${product.stockQty} ${product.name} left")
-                }
-            }
+            val needs = catalog.needs(qtyByProduct)
+            needs.forEach { (stockId, qty) -> takeStock(stockId, qty) }
 
             val price = price(items, products, discount) { products.getValue(it).priceSen }
             val orderId = orderDao.insertOrder(
@@ -195,7 +230,7 @@ class PosRepository(
 
             orderDao.insertItems(items.map { it.toOrderItem(orderId, products.getValue(it.productId).priceSen) })
             movementDao.insertAll(
-                qtyByProduct.map { (productId, qty) ->
+                needs.map { (productId, qty) ->
                     StockMovement(
                         productId = productId,
                         changeQty = -qty,
@@ -228,21 +263,29 @@ class PosRepository(
             val oldPrice = oldItems.associate { it.productId to it.unitPriceSen }
             val newQty = items.groupingBy { it.productId }.fold(0) { sum, item -> sum + item.qty }
             val products = loadProducts(oldQty.keys + newQty.keys)
+            val catalog = loadCatalog()
 
-            val movements = mutableListOf<StockMovement>()
-            for ((productId, product) in products) {
-                // Positive = more items leave the stock
-                val delta = (newQty[productId] ?: 0) - (oldQty[productId] ?: 0)
-                if (delta > 0 && productDao.deductStock(productId, delta) == 0) {
-                    throw PosException(
-                        if (!product.isActive) "${product.name} is deactivated: you can keep or reduce it, not add more"
-                        else "Only ${product.stockQty} more ${product.name} in stock"
-                    )
+            // Your rule: a deactivated product can be kept or reduced, never increased
+            newQty.forEach { (productId, qty) ->
+                val product = products.getValue(productId)
+                if (qty > (oldQty[productId] ?: 0)) {
+                    if (!product.isActive) throw PosException("${product.name} is deactivated: you can keep or reduce it, not add more")
+                    if (product.isMaterial) throw PosException("${product.name} is a material and can't be sold")
                 }
-                if (delta < 0) productDao.addStock(productId, -delta)
+            }
+
+            // What the order took (from its movements) vs what the new lines need. Only the difference is applied.
+            val took = movementDao.netForOrder(orderId).associate { it.productId to -it.changeQty }
+            val needs = catalog.needs(newQty)
+            val movements = mutableListOf<StockMovement>()
+            for (stockId in took.keys + needs.keys) {
+                // Positive = more items leave the stock
+                val delta = (needs[stockId] ?: 0) - (took[stockId] ?: 0)
+                if (delta > 0) takeStock(stockId, delta, more = true)
+                if (delta < 0) productDao.addStock(stockId, -delta)
                 if (delta != 0) {
                     movements += StockMovement(
-                        productId = productId,
+                        productId = stockId,
                         changeQty = -delta,
                         reason = MovementReason.EDIT,
                         orderId = orderId,
@@ -276,13 +319,14 @@ class PosRepository(
     suspend fun cancelOrder(orderId: Int) = db.withTransaction {
         val now = clock()
         if (orderDao.markCancelled(orderId, now) == 0) return@withTransaction
-        val items = orderDao.getItems(orderId)
-        items.forEach { productDao.addStock(it.productId, it.qty) }
+        // Give back exactly what the order took (parts included), even if a set's parts changed since
+        val returned = movementDao.netForOrder(orderId).filter { it.changeQty < 0 }
+        returned.forEach { productDao.addStock(it.productId, -it.changeQty) }
         movementDao.insertAll(
-            items.map {
+            returned.map {
                 StockMovement(
                     productId = it.productId,
-                    changeQty = it.qty,
+                    changeQty = -it.changeQty,
                     reason = MovementReason.CANCEL,
                     orderId = orderId,
                     createdAt = now,
@@ -290,6 +334,21 @@ class PosRepository(
             }
         )
     }
+
+    /** Conditional UPDATE: stock can never go below 0. Throws a message the user can read. */
+    private suspend fun takeStock(productId: Int, qty: Int, more: Boolean = false) {
+        if (productDao.deductStock(productId, qty) > 0) return
+        val product = productDao.getById(productId) ?: throw PosException("Product not found")
+        throw PosException(
+            when {
+                !product.isActive -> "${product.name} is deactivated"
+                more -> "Only ${product.stockQty} more ${product.name} in stock"
+                else -> "Only ${product.stockQty} ${product.name} left"
+            }
+        )
+    }
+
+    private suspend fun loadCatalog() = Catalog(productDao.getAll(), partDao.getAll())
 
     private suspend fun loadProducts(ids: Collection<Int>): Map<Int, Product> =
         ids.distinct().associateWith { productDao.getById(it) ?: throw PosException("Product not found") }

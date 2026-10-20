@@ -28,10 +28,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -71,6 +74,7 @@ import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.BundleType
 import com.bobbykong.merchpos.data.model.BundleWithProducts
 import com.bobbykong.merchpos.data.model.Product
+import com.bobbykong.merchpos.domain.Catalog
 import com.bobbykong.merchpos.ui.AppViewModelProvider
 import com.bobbykong.merchpos.ui.components.CategorySidebar
 import com.bobbykong.merchpos.ui.components.ProductImage
@@ -86,6 +90,7 @@ fun ProductsScreen(
     viewModel: ProductsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val products by viewModel.products.collectAsStateWithLifecycle()
+    val catalog by viewModel.catalog.collectAsStateWithLifecycle()
     val bundles by viewModel.bundles.collectAsStateWithLifecycle()
     val pendingDelete by viewModel.pendingDelete.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
@@ -113,6 +118,7 @@ fun ProductsScreen(
             if (tab == 0) {
                 ProductsWithSidebar(
                     products = products,
+                    catalog = catalog,
                     categories = categories,
                     selected = selectedCategory?.takeIf { it in categories },
                     onSelect = { selectedCategory = it },
@@ -147,6 +153,7 @@ fun ProductsScreen(
     if (showProductForm) {
         ProductFormDialog(
             original = editingProduct,
+            catalog = catalog,
             categories = categories,
             onDismiss = { showProductForm = false },
             onSave = { form -> viewModel.save(editingProduct, form) },
@@ -172,6 +179,7 @@ fun ProductsScreen(
 @Composable
 private fun ProductsWithSidebar(
     products: List<Product>,
+    catalog: Catalog,
     categories: List<String>,
     selected: String?,
     onSelect: (String?) -> Unit,
@@ -186,6 +194,7 @@ private fun ProductsWithSidebar(
         VerticalDivider()
         ProductList(
             products = if (selected == null) products else products.filter { it.category == selected },
+            catalog = catalog,
             onClick = onClick,
             modifier = Modifier.weight(1f),
         )
@@ -193,7 +202,7 @@ private fun ProductsWithSidebar(
 }
 
 @Composable
-private fun ProductList(products: List<Product>, onClick: (Product) -> Unit, modifier: Modifier = Modifier) {
+private fun ProductList(products: List<Product>, catalog: Catalog, onClick: (Product) -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 88.dp),
@@ -208,11 +217,25 @@ private fun ProductList(products: List<Product>, onClick: (Product) -> Unit, mod
                     headlineContent = { Text(product.name) },
                     supportingContent = {
                         Column {
-                            Text("${product.category} · ${formatRm(product.priceSen)}")
-                            StockLabel(product)
+                            Text(
+                                if (product.isMaterial) "${product.category} · not sold"
+                                else "${product.category} · ${formatRm(product.priceSen)}"
+                            )
+                            val parts = catalog.partsOf(product.id)
+                            if (parts.isNotEmpty()) {
+                                Text(
+                                    "Made of " + parts.joinToString { "${catalog.nameOf(it.partId)} ×${it.qty}" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            StockLabel(product, setLabel = parts.isNotEmpty())
                         }
                     },
-                    trailingContent = if (product.isActive) null else ({ Text("Inactive") }),
+                    trailingContent = when {
+                        !product.isActive -> ({ Text("Inactive") })
+                        product.isMaterial -> ({ Text("Material") })
+                        else -> null
+                    },
                 )
             }
         }
@@ -259,6 +282,7 @@ private fun EmptyText(text: String) {
 @Composable
 private fun ProductFormDialog(
     original: Product?,
+    catalog: Catalog,
     categories: List<String>,
     onDismiss: () -> Unit,
     onSave: (ProductForm) -> String?,
@@ -268,7 +292,7 @@ private fun ProductFormDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var form by remember { mutableStateOf(ProductForm.from(original)) }
+    var form by remember { mutableStateOf(ProductForm.from(original, catalog)) }
     var error by remember { mutableStateOf<String?>(null) }
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -334,20 +358,42 @@ private fun ProductFormDialog(
                     singleLine = true,
                 )
                 CategoryField(form.category, categories) { form = form.copy(category = it) }
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    ProductKind.entries.forEachIndexed { i, kind ->
+                        SegmentedButton(
+                            selected = form.kind == kind,
+                            onClick = { form = form.copy(kind = kind) },
+                            shape = SegmentedButtonDefaults.itemShape(i, ProductKind.entries.size),
+                            icon = {},
+                        ) { Text(kind.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                    }
+                }
+                Text(
+                    when (form.kind) {
+                        ProductKind.NORMAL -> "Has its own stock."
+                        ProductKind.USES_PARTS -> "No stock of its own: selling it takes its parts. E.g. a poster set, or a cheki that uses 1 film."
+                        ProductKind.MATERIAL -> "Not shown on Sell. Other products use it, e.g. Instax film."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedTextField(
                     value = form.price,
                     onValueChange = { form = form.copy(price = it) },
-                    label = { Text("Price (RM)") },
+                    label = { Text(if (form.kind == ProductKind.MATERIAL) "Cost (RM, optional)" else "Price (RM)") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 )
-                OutlinedTextField(
-                    value = form.stock,
-                    onValueChange = { form = form.copy(stock = it) },
-                    label = { Text("Stock") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
+                if (form.kind == ProductKind.USES_PARTS) {
+                    PartsEditor(form, catalog.partChoices(original?.id ?: 0), catalog) { form = it }
+                } else {
+                    OutlinedTextField(
+                        value = form.stock,
+                        onValueChange = { form = form.copy(stock = it) },
+                        label = { Text("Stock") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
                 if (original != null) {
                     ActiveSwitch(
                         checked = form.isActive,
@@ -549,6 +595,45 @@ private fun CategoryField(value: String, categories: List<String>, onChange: (St
             categories.forEach { category ->
                 SuggestionChip(onClick = { onChange(category) }, label = { Text(category) })
             }
+        }
+    }
+}
+
+/** The parts list: each part with − qty +, and "Add part" to pick another product. */
+@Composable
+private fun PartsEditor(form: ProductForm, choices: List<Product>, catalog: Catalog, onChange: (ProductForm) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Parts", style = MaterialTheme.typography.titleSmall)
+        if (form.parts.isEmpty()) Text("None yet", style = MaterialTheme.typography.bodySmall)
+        form.parts.forEach { (id, qty) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(catalog.nameOf(id), Modifier.weight(1f))
+                IconButton(onClick = { onChange(form.removeOnePart(id)) }) { Text("−") }
+                Text("$qty")
+                IconButton(onClick = { onChange(form.addPart(id)) }) { Text("+") }
+            }
+        }
+        Box {
+            TextButton(onClick = { picking = true }) { Text("+ Add part") }
+            DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                choices.filter { it.id !in form.parts }.forEach { product ->
+                    DropdownMenuItem(
+                        text = { Text("${product.name} (${product.stockQty} left)") },
+                        onClick = {
+                            onChange(form.addPart(product.id))
+                            picking = false
+                        },
+                    )
+                }
+            }
+        }
+        if (form.parts.isNotEmpty()) {
+            // Same maths as the app uses when selling
+            val canMake = form.parts.minOf { (id, qty) ->
+                (choices.firstOrNull { it.id == id }?.takeIf { it.isActive }?.stockQty ?: 0) / qty
+            }
+            Text("Can make now: $canMake", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

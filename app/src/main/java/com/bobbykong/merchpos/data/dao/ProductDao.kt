@@ -15,6 +15,9 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE is_active = 1 ORDER BY category COLLATE NOCASE, name COLLATE NOCASE")
     fun observeActive(): Flow<List<Product>>
 
+    @Query("SELECT * FROM products")
+    suspend fun getAll(): List<Product>
+
     @Query("SELECT * FROM products WHERE id = :id")
     suspend fun getById(id: Int): Product?
 

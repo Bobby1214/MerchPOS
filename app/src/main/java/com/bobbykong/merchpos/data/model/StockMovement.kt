@@ -37,3 +37,9 @@ data class StockMovement(
     @ColumnInfo(name = "order_id") val orderId: Int? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 )
+
+/** Net stock change of one product, e.g. -3 = 3 were taken. */
+data class StockChange(
+    @ColumnInfo(name = "product_id") val productId: Int,
+    @ColumnInfo(name = "change_qty") val changeQty: Int,
+)

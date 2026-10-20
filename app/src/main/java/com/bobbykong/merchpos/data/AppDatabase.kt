@@ -9,6 +9,7 @@ import com.bobbykong.merchpos.data.dao.BundleDao
 import com.bobbykong.merchpos.data.dao.EventDao
 import com.bobbykong.merchpos.data.dao.OrderDao
 import com.bobbykong.merchpos.data.dao.ProductDao
+import com.bobbykong.merchpos.data.dao.ProductPartDao
 import com.bobbykong.merchpos.data.dao.ReportDao
 import com.bobbykong.merchpos.data.dao.StockMovementDao
 import com.bobbykong.merchpos.data.model.BundleDeal
@@ -17,18 +18,20 @@ import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.Order
 import com.bobbykong.merchpos.data.model.OrderItem
 import com.bobbykong.merchpos.data.model.Product
+import com.bobbykong.merchpos.data.model.ProductPart
 import com.bobbykong.merchpos.data.model.StockMovement
 
 @Database(
     entities = [
         Event::class, Product::class, Order::class, OrderItem::class, StockMovement::class, BundleDeal::class,
-        BundleProduct::class,
+        BundleProduct::class, ProductPart::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
     // Room writes these migrations from the saved schemas.
     // v2: bundles table + discount columns. v3: bundle type + bundle_products link table.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    // v4: product_parts (sets, cheki film) + products.is_material.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
@@ -37,6 +40,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun stockMovementDao(): StockMovementDao
     abstract fun reportDao(): ReportDao
     abstract fun bundleDao(): BundleDao
+    abstract fun productPartDao(): ProductPartDao
 
     companion object {
         const val DB_NAME = "merchpos.db"

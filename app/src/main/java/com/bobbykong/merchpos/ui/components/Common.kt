@@ -34,10 +34,13 @@ import com.bobbykong.merchpos.data.model.isSoldOut
 
 /** "12 left", or a red warning when stock is low or sold out. */
 @Composable
-fun StockLabel(product: Product, modifier: Modifier = Modifier) {
+/** [setLabel] = the product is made of parts, so the number is "how many can be made". */
+fun StockLabel(product: Product, modifier: Modifier = Modifier, setLabel: Boolean = false) {
     val (text, color) = when {
+        product.isSoldOut && setLabel -> "Can't make: a part is out" to MaterialTheme.colorScheme.error
         product.isSoldOut -> "Sold out" to MaterialTheme.colorScheme.error
         product.isLowStock -> "Low stock: ${product.stockQty} left" to MaterialTheme.colorScheme.error
+        setLabel -> "Can make ${product.stockQty}" to MaterialTheme.colorScheme.onSurfaceVariant
         else -> "${product.stockQty} left" to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(text, style = MaterialTheme.typography.bodySmall, color = color, modifier = modifier)

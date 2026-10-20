@@ -9,13 +9,13 @@ import com.bobbykong.merchpos.data.model.OrderDiscount
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.domain.BundleRule
+import com.bobbykong.merchpos.domain.Catalog
 import com.bobbykong.merchpos.domain.CartKey
 import com.bobbykong.merchpos.domain.PriceBreakdown
 import com.bobbykong.merchpos.domain.PriceCalculator
 import com.bobbykong.merchpos.domain.PriceLine
 import com.bobbykong.merchpos.domain.minusOne
 import com.bobbykong.merchpos.domain.plusOne
-import com.bobbykong.merchpos.domain.qtyOf
 import com.bobbykong.merchpos.domain.toCartItems
 import com.bobbykong.merchpos.domain.toggleGift
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +40,7 @@ data class SellUiState(
     val selectedCategory: String? = null,
     val cart: List<CartLine> = emptyList(),
     val bundles: List<BundleRule> = emptyList(),
+    val catalog: Catalog = Catalog(),
 ) {
     val visibleProducts: List<Product>
         get() = if (selectedCategory == null) products else products.filter { it.category == selectedCategory }
@@ -65,20 +66,21 @@ class SellViewModel(private val repository: PosRepository) : ViewModel() {
     val uiState: StateFlow<SellUiState> =
         combine(
             repository.openEvent,
-            repository.activeProducts,
+            repository.catalog,
             repository.activeBundles,
             cart,
             category,
-        ) { event, products, bundles, cart, category ->
+        ) { event, catalog, bundles, cart, category ->
+            val products = catalog.sellable
             val byId = products.associateBy { it.id }
             val categories = products.map { it.category }.distinct().sorted()
-            // Drop deactivated products, and never show more than is in stock (paid + gift together)
-            val left = mutableMapOf<Int, Int>()
+            // Drop deactivated products, and never show more than is in stock (paid + gift together).
+            // Stock is shared: 2 cheki types use the same film, a set uses the same posters as single sales.
+            val taken = mutableMapOf<Int, Int>()
             val lines = cart.mapNotNull { (key, qty) ->
                 val product = byId[key.productId] ?: return@mapNotNull null
-                val remaining = left.getOrPut(product.id) { product.stockQty }
-                val shown = qty.coerceAtMost(remaining)
-                left[product.id] = remaining - shown
+                val shown = qty.coerceAtMost(catalog.canMake(product.id, catalog.leftAfter(taken)))
+                taken[product.id] = (taken[product.id] ?: 0) + shown
                 CartLine(product, shown, key.isGift).takeIf { shown > 0 }
             }
             SellUiState(
@@ -89,14 +91,20 @@ class SellViewModel(private val repository: PosRepository) : ViewModel() {
                 selectedCategory = category?.takeIf { it in categories },
                 cart = lines,
                 bundles = bundles,
+                catalog = catalog,
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SellUiState())
 
     fun add(product: Product) = increase(CartKey(product.id, isGift = false), product)
 
     fun increase(key: CartKey, product: Product) {
-        if (cart.value.qtyOf(product.id) >= product.stockQty) {
-            _message.value = "Only ${product.stockQty} ${product.name} in stock"
+        val state = uiState.value
+        val inCart = state.cart.groupingBy { it.product.id }.fold(0) { sum, line -> sum + line.qty }
+        if (state.catalog.canMake(product.id, state.catalog.leftAfter(inCart)) < 1) {
+            val parts = state.catalog.partsOf(product.id)
+            _message.value =
+                if (parts.isEmpty()) "Only ${product.stockQty} ${product.name} in stock"
+                else "Not enough " + parts.joinToString(" / ") { state.catalog.nameOf(it.partId) } + " for another ${product.name}"
             return
         }
         cart.update { it.plusOne(key) }

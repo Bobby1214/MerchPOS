@@ -1,8 +1,11 @@
 package com.bobbykong.merchpos
 
 import com.bobbykong.merchpos.data.files.csvField
+import com.bobbykong.merchpos.data.model.BundleType
+import com.bobbykong.merchpos.data.model.BundleWithProducts
 import com.bobbykong.merchpos.data.model.DiscountType
 import com.bobbykong.merchpos.data.model.OrderDiscount
+import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.domain.CartKey
 import com.bobbykong.merchpos.domain.minusOne
 import com.bobbykong.merchpos.domain.plusOne
@@ -48,6 +51,23 @@ class FormsAndCartTest {
         assertNotNull(form.copy(qty = "1").validate())
         assertNotNull(form.copy(category = " ").validate())
         assertNotNull(form.copy(price = "x").validate())
+
+        val products = BundleForm(type = BundleType.PRODUCTS, qty = "3", price = "25")
+        assertNotNull(products.validate()) // nothing ticked
+        val one = products.toggleProduct(1)
+        assertNull(one.validate())
+        assertEquals("3 × Raiden Badge", one.toBundle(0, mapOf(1 to "Raiden Badge")).name)
+        val two = one.toggleProduct(2)
+        assertEquals("Any 3 of Furina Badge, Raiden Badge", two.toBundle(0, mapOf(1 to "Raiden Badge", 2 to "Furina Badge")).name)
+        assertEquals(null, two.toBundle(0).category)
+        assertEquals(setOf(2), two.toggleProduct(1).productIds)
+
+        // Editing: an auto name is blanked so it can update, a custom name is kept
+        val raiden = Product(id = 1, name = "Raiden Badge", category = "Badge", priceSen = 1000, stockQty = 5)
+        val saved = one.toBundle(5, mapOf(1 to "Raiden Badge"))
+        assertEquals("", BundleForm.from(BundleWithProducts(saved, listOf(raiden))).name)
+        val custom = saved.copy(name = "Raiden deal")
+        assertEquals("Raiden deal", BundleForm.from(BundleWithProducts(custom, listOf(raiden))).name)
     }
 
     @Test

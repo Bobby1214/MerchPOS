@@ -4,11 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
-import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.OrderDiscount
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.Product
+import com.bobbykong.merchpos.domain.BundleRule
 import com.bobbykong.merchpos.domain.CartKey
 import com.bobbykong.merchpos.domain.PriceBreakdown
 import com.bobbykong.merchpos.domain.PriceCalculator
@@ -39,7 +39,7 @@ data class SellUiState(
     val categories: List<String> = emptyList(),
     val selectedCategory: String? = null,
     val cart: List<CartLine> = emptyList(),
-    val bundles: List<BundleDeal> = emptyList(),
+    val bundles: List<BundleRule> = emptyList(),
 ) {
     val visibleProducts: List<Product>
         get() = if (selectedCategory == null) products else products.filter { it.category == selectedCategory }
@@ -47,7 +47,7 @@ data class SellUiState(
     val price: PriceBreakdown = priceWith(null)
 
     fun priceWith(discount: OrderDiscount?): PriceBreakdown = PriceCalculator.calculate(
-        cart.map { PriceLine(it.product.category, it.product.priceSen, it.qty, it.isGift) },
+        cart.map { PriceLine(it.product.id, it.product.category, it.product.priceSen, it.qty, it.isGift) },
         bundles,
         discount,
     )

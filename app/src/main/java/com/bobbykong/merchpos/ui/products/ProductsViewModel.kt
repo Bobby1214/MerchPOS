@@ -8,6 +8,7 @@ import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
 import com.bobbykong.merchpos.data.files.ImageStore
 import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.BundleWithProducts
 import com.bobbykong.merchpos.data.model.Product
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +29,7 @@ class ProductsViewModel(
 ) : ViewModel() {
     val products: StateFlow<List<Product>> =
         repository.allProducts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val bundles: StateFlow<List<BundleDeal>> =
+    val bundles: StateFlow<List<BundleWithProducts>> =
         repository.allBundles.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _pendingDelete = MutableStateFlow<PendingProductDelete?>(null)
@@ -115,7 +116,8 @@ class ProductsViewModel(
 
     fun saveBundle(original: BundleDeal?, form: BundleForm): String? {
         form.validate()?.let { return it }
-        viewModelScope.launch { repository.saveBundle(form.toBundle(original?.id ?: 0)) }
+        val names = products.value.associate { it.id to it.name }
+        viewModelScope.launch { repository.saveBundle(form.toBundle(original?.id ?: 0, names), form.productIds) }
         return null
     }
 

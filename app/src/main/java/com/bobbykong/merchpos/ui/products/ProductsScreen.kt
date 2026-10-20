@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,13 +27,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
@@ -54,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,6 +68,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bobbykong.merchpos.data.files.ImageStore
 import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.BundleType
+import com.bobbykong.merchpos.data.model.BundleWithProducts
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.ui.AppViewModelProvider
 import com.bobbykong.merchpos.ui.components.CategorySidebar
@@ -85,7 +94,7 @@ fun ProductsScreen(
     var showProductForm by remember { mutableStateOf(false) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var showBundleForm by remember { mutableStateOf(false) }
-    var editingBundle by remember { mutableStateOf<BundleDeal?>(null) }
+    var editingBundle by remember { mutableStateOf<BundleWithProducts?>(null) }
     val categories = products.map { it.category }.distinct().sorted()
 
     LaunchedEffect(message) {
@@ -150,9 +159,10 @@ fun ProductsScreen(
     if (showBundleForm) {
         BundleFormDialog(
             original = editingBundle,
+            products = products,
             categories = categories,
             onDismiss = { showBundleForm = false },
-            onSave = { form -> viewModel.saveBundle(editingBundle, form) },
+            onSave = { form -> viewModel.saveBundle(editingBundle?.bundle, form) },
             onDelete = { viewModel.deleteBundle(it) },
         )
     }
@@ -210,14 +220,14 @@ private fun ProductList(products: List<Product>, onClick: (Product) -> Unit, mod
 }
 
 @Composable
-private fun BundleList(bundles: List<BundleDeal>, onClick: (BundleDeal) -> Unit) {
+private fun BundleList(bundles: List<BundleWithProducts>, onClick: (BundleWithProducts) -> Unit) {
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             Text(
-                "A bundle applies by itself in the cart when the customer picks enough items from its category. " +
+                "A bundle applies by itself in the cart when the customer picks enough items from its category or product list. " +
                     "If several bundles fit, the app picks the best deal for the customer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -226,11 +236,12 @@ private fun BundleList(bundles: List<BundleDeal>, onClick: (BundleDeal) -> Unit)
         if (bundles.isEmpty()) {
             item { Text("No bundles yet. Tap + to add one, e.g. any 3 Badges for RM20.", modifier = Modifier.padding(top = 16.dp)) }
         }
-        items(bundles, key = { it.id }) { bundle ->
-            Card(onClick = { onClick(bundle) }, modifier = Modifier.alpha(if (bundle.isActive) 1f else 0.5f)) {
+        items(bundles, key = { it.bundle.id }) { item ->
+            val bundle = item.bundle
+            Card(onClick = { onClick(item) }, modifier = Modifier.alpha(if (bundle.isActive) 1f else 0.5f)) {
                 ListItem(
                     headlineContent = { Text(bundle.name) },
-                    supportingContent = { Text("Any ${bundle.qty} × ${bundle.category} for ${formatRm(bundle.priceSen)}") },
+                    supportingContent = { Text(bundleRuleText(item)) },
                     trailingContent = if (bundle.isActive) null else ({ Text("Off") }),
                 )
             }
@@ -394,15 +405,34 @@ private fun DeleteProductDialog(pending: PendingProductDelete, viewModel: Produc
     }
 }
 
+/** e.g. "Any 3 × Badge for RM20" or "Any 3 of: Raiden Badge, Furina Badge for RM25". */
+private fun bundleRuleText(item: BundleWithProducts): String {
+    val b = item.bundle
+    val price = formatRm(b.priceSen)
+    return when (b.type) {
+        BundleType.CATEGORY -> "Any ${b.qty} × ${b.category} for $price"
+        BundleType.PRODUCTS -> {
+            val names = item.products.map { it.name }.sorted()
+            when {
+                names.isEmpty() -> "No products ticked: never applies"
+                names.size == 1 -> "${b.qty} × ${names.single()} for $price"
+                else -> "Any ${b.qty} of: ${names.joinToString()} for $price"
+            }
+        }
+    }
+}
+
 @Composable
 private fun BundleFormDialog(
-    original: BundleDeal?,
+    original: BundleWithProducts?,
+    products: List<Product>,
     categories: List<String>,
     onDismiss: () -> Unit,
     onSave: (BundleForm) -> String?,
     onDelete: (BundleDeal) -> Unit,
 ) {
     var form by remember { mutableStateOf(BundleForm.from(original)) }
+    var pickerCategory by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -410,7 +440,57 @@ private fun BundleFormDialog(
         title = { Text(if (original == null) "Add bundle" else "Edit bundle") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                CategoryField(form.category, categories) { form = form.copy(category = it) }
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    BundleType.entries.forEachIndexed { i, type ->
+                        SegmentedButton(
+                            selected = form.type == type,
+                            onClick = { form = form.copy(type = type) },
+                            shape = SegmentedButtonDefaults.itemShape(i, BundleType.entries.size),
+                        ) { Text(if (type == BundleType.CATEGORY) "Category" else "Products") }
+                    }
+                }
+                when (form.type) {
+                    BundleType.CATEGORY -> CategoryField(form.category, categories) { form = form.copy(category = it) }
+                    BundleType.PRODUCTS -> {
+                        Text(
+                            "Tick the products. Any mix of them counts, e.g. 2 Raiden + 1 Furina.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        // Category chips to shorten the list
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(pickerCategory == null, onClick = { pickerCategory = null }, label = { Text("All") })
+                            categories.forEach { c ->
+                                FilterChip(pickerCategory == c, onClick = { pickerCategory = c }, label = { Text(c) })
+                            }
+                        }
+                        products
+                            // Inactive products can't be sold, but keep the ones already ticked visible
+                            .filter { it.isActive || it.id in form.productIds }
+                            .filter { pickerCategory == null || it.category == pickerCategory }
+                            .forEach { product ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .toggleable(
+                                            value = product.id in form.productIds,
+                                            role = Role.Checkbox,
+                                            onValueChange = { form = form.toggleProduct(product.id) },
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(checked = product.id in form.productIds, onCheckedChange = null)
+                                    Column(Modifier.padding(start = 8.dp)) {
+                                        Text(product.name)
+                                        Text(
+                                            "${product.category} · ${formatRm(product.priceSen)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                }
+                            }
+                        Text("${form.productIds.size} ticked", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 OutlinedTextField(
                     value = form.qty,
                     onValueChange = { form = form.copy(qty = it) },
@@ -437,7 +517,7 @@ private fun BundleFormDialog(
                         form = form.copy(isActive = it)
                     }
                     TextButton(onClick = {
-                        onDelete(original)
+                        onDelete(original.bundle)
                         onDismiss()
                     }) { Text("Delete bundle", color = MaterialTheme.colorScheme.error) }
                 }

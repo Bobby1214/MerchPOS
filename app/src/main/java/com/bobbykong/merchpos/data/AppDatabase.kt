@@ -12,6 +12,7 @@ import com.bobbykong.merchpos.data.dao.ProductDao
 import com.bobbykong.merchpos.data.dao.ReportDao
 import com.bobbykong.merchpos.data.dao.StockMovementDao
 import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.BundleProduct
 import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.Order
 import com.bobbykong.merchpos.data.model.OrderItem
@@ -21,11 +22,13 @@ import com.bobbykong.merchpos.data.model.StockMovement
 @Database(
     entities = [
         Event::class, Product::class, Order::class, OrderItem::class, StockMovement::class, BundleDeal::class,
+        BundleProduct::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    // v2: bundles table + discount columns. Room writes this migration from the saved schemas.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // Room writes these migrations from the saved schemas.
+    // v2: bundles table + discount columns. v3: bundle type + bundle_products link table.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao

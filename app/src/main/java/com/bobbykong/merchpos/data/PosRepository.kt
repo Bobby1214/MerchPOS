@@ -2,6 +2,8 @@ package com.bobbykong.merchpos.data
 
 import androidx.room.withTransaction
 import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.BundleProduct
+import com.bobbykong.merchpos.data.model.BundleType
 import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.MovementReason
 import com.bobbykong.merchpos.data.model.Order
@@ -13,6 +15,8 @@ import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.data.model.StockMovement
 import com.bobbykong.merchpos.domain.PriceCalculator
 import com.bobbykong.merchpos.domain.PriceLine
+import com.bobbykong.merchpos.domain.toRule
+import kotlinx.coroutines.flow.map
 
 /** A business rule was broken. The message is safe to show to the user. */
 class PosException(message: String) : Exception(message)
@@ -39,7 +43,7 @@ class PosRepository(
     val events = eventDao.observeAll()
     val openEvent = eventDao.observeOpen()
     val allBundles = bundleDao.observeAll()
-    val activeBundles = bundleDao.observeActive()
+    val activeBundles = bundleDao.observeActive().map { list -> list.map { it.toRule() } }
 
     fun ordersForEvent(eventId: Int) = orderDao.observeForEvent(eventId)
     fun linesForEvent(eventId: Int) = orderDao.observeLinesForEvent(eventId)
@@ -134,8 +138,13 @@ class PosRepository(
         productDao.delete(productId)
     }
 
-    suspend fun saveBundle(bundle: BundleDeal) {
-        if (bundle.id == 0) bundleDao.insert(bundle) else bundleDao.update(bundle)
+    /** Saves the bundle and replaces its product list ([productIds] is only used by PRODUCTS bundles). */
+    suspend fun saveBundle(bundle: BundleDeal, productIds: Set<Int> = emptySet()) = db.withTransaction {
+        val id = if (bundle.id == 0) bundleDao.insert(bundle).toInt() else bundle.id.also { bundleDao.update(bundle) }
+        bundleDao.clearProducts(id)
+        if (bundle.type == BundleType.PRODUCTS) {
+            bundleDao.insertProducts(productIds.map { BundleProduct(bundleId = id, productId = it) })
+        }
     }
 
     suspend fun deleteBundle(bundle: BundleDeal) = bundleDao.delete(bundle)
@@ -292,9 +301,9 @@ class PosRepository(
         unitPrice: (Int) -> Int,
     ) = PriceCalculator.calculate(
         lines = items.map {
-            PriceLine(products.getValue(it.productId).category, unitPrice(it.productId), it.qty, it.isGift)
+            PriceLine(it.productId, products.getValue(it.productId).category, unitPrice(it.productId), it.qty, it.isGift)
         },
-        bundles = bundleDao.getActive(),
+        bundles = bundleDao.getActive().map { it.toRule() },
         discount = discount,
     )
 

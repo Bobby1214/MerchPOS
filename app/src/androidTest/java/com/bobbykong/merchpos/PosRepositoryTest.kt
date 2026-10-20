@@ -8,6 +8,7 @@ import com.bobbykong.merchpos.data.CartItem
 import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
 import com.bobbykong.merchpos.data.model.BundleDeal
+import com.bobbykong.merchpos.data.model.BundleType
 import com.bobbykong.merchpos.data.model.DiscountType
 import com.bobbykong.merchpos.data.model.MovementReason
 import com.bobbykong.merchpos.data.model.OrderDiscount
@@ -272,5 +273,29 @@ class PosRepositoryTest {
         repo.deleteEvent(eventId)
         repo.deleteProduct(sold)
         assertEquals(null, db.productDao().getById(sold))
+    }
+
+    @Test
+    fun productBundleSavesLinksAndPricesCheckout() = runBlocking {
+        repo.startEvent("Comic Fiesta")
+        val raiden = repo.addProduct("Raiden Badge", "Badge", 1000, 10)
+        val furina = repo.addProduct("Furina Badge", "Badge", 1000, 10)
+        val zhongli = repo.addProduct("Zhongli Badge", "Badge", 800, 10)
+        repo.saveBundle(
+            BundleDeal(name = "Raiden/Furina", type = BundleType.PRODUCTS, qty = 3, priceSen = 2500),
+            productIds = setOf(raiden, furina),
+        )
+        val saved = db.bundleDao().getActive().single()
+        assertEquals(setOf(raiden, furina), saved.products.map { it.id }.toSet())
+
+        // Zhongli isn't in the bundle
+        val noDeal = repo.checkout(listOf(CartItem(raiden, 2), CartItem(zhongli, 1)), PaymentMethod.CASH)
+        assertEquals(2800, db.orderDao().getById(noDeal)!!.totalSen)
+        val deal = repo.checkout(listOf(CartItem(raiden, 2), CartItem(furina, 1)), PaymentMethod.CASH)
+        assertEquals(2500, db.orderDao().getById(deal)!!.totalSen)
+
+        // Switching to a category bundle clears the product links
+        repo.saveBundle(saved.bundle.copy(type = BundleType.CATEGORY, category = "Badge"), productIds = setOf(raiden))
+        assertTrue(db.bundleDao().getActive().single().products.isEmpty())
     }
 }

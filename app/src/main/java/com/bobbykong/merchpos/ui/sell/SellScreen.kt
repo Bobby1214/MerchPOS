@@ -1,6 +1,36 @@
 package com.bobbykong.merchpos.ui.sell
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import com.bobbykong.merchpos.ui.components.Pill
+import com.bobbykong.merchpos.ui.components.ProductPicture
+import com.bobbykong.merchpos.ui.components.pressBounce
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,14 +55,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,7 +88,6 @@ import com.bobbykong.merchpos.ui.components.DiscountInput
 import com.bobbykong.merchpos.ui.components.DiscountPicker
 import com.bobbykong.merchpos.ui.components.PaymentPicker
 import com.bobbykong.merchpos.ui.components.PriceSummary
-import com.bobbykong.merchpos.ui.components.ProductImage
 import com.bobbykong.merchpos.ui.components.StartEventCard
 import com.bobbykong.merchpos.ui.components.StockLabel
 import com.bobbykong.merchpos.util.formatRm
@@ -95,11 +122,11 @@ fun SellScreen(
     }
 
     Column(modifier) {
-        Text(
-            "Event: ${event.name}",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        Pill(
+            "Now selling at ${event.name}",
+            container = MaterialTheme.colorScheme.tertiaryContainer,
+            content = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
         )
 
         if (state.products.isEmpty()) {
@@ -118,14 +145,13 @@ fun SellScreen(
                     selected = state.selectedCategory,
                     onSelect = viewModel::selectCategory,
                 )
-                VerticalDivider()
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(128.dp),
+                    columns = GridCells.Adaptive(116.dp),
                     modifier = Modifier.weight(1f),
                     state = gridState,
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 4.dp, top = 4.dp, end = 12.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.visibleProducts, key = { it.id }) { product ->
                         ProductTile(
@@ -133,13 +159,20 @@ fun SellScreen(
                             inCart = state.qtyInCart(product.id),
                             isSet = state.catalog.hasParts(product.id),
                             onClick = { viewModel.add(product) },
+                            // Tiles glide to their new place when the category or order changes
+                            modifier = Modifier.animateItem(),
                         )
                     }
                 }
             }
         }
 
-        if (state.cart.isNotEmpty()) {
+        // The cart slides up from the bottom when the first item is added
+        AnimatedVisibility(
+            visible = state.cart.isNotEmpty(),
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+        ) {
             CartPanel(
                 state = state,
                 onIncrease = { viewModel.increase(it.key, it.product) },
@@ -164,33 +197,102 @@ fun SellScreen(
 }
 
 @Composable
-private fun ProductTile(product: Product, inCart: Int, isSet: Boolean, onClick: () -> Unit) {
-    Card(onClick = onClick, enabled = !product.isSoldOut) {
-        Column {
-            product.imagePath?.let {
-                ProductImage(it, Modifier.fillMaxWidth().aspectRatio(1.5f))
-            }
-            Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                Text(
-                    product.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    product.category,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(formatRm(product.priceSen), style = MaterialTheme.typography.titleSmall)
-                StockLabel(product, setLabel = isSet)
-                if (inCart > 0) {
-                    Text(
-                        "In cart: $inCart",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+private fun ProductTile(product: Product, inCart: Int, isSet: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val soldOut = product.isSoldOut
+    Card(
+        onClick = onClick,
+        enabled = !soldOut,
+        interactionSource = interaction,
+        modifier = modifier
+            .pressBounce(interaction)
+            .alpha(if (soldOut) 0.55f else 1f),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp, pressedElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(8.dp)) {
+            Box {
+                ProductPicture(product, Modifier.fillMaxWidth().aspectRatio(1.2f).clip(MaterialTheme.shapes.medium))
+                when {
+                    soldOut -> Pill(
+                        "Sold out",
+                        MaterialTheme.colorScheme.errorContainer,
+                        MaterialTheme.colorScheme.error,
+                        Modifier.align(Alignment.TopStart).padding(6.dp),
+                    )
+                    isSet -> Pill(
+                        "Set",
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer,
+                        Modifier.align(Alignment.TopStart).padding(6.dp),
                     )
                 }
+                CartBadge(inCart, Modifier.align(Alignment.TopEnd).padding(6.dp))
+            }
+            Text(
+                product.name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                minLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp, start = 2.dp),
+            )
+            StockLabel(product, Modifier.padding(start = 2.dp), setLabel = isSet)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    formatRm(product.priceSen),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f).padding(start = 2.dp),
+                )
+                // The round "+" of shopping apps. The whole card is the button; this just shows it.
+                Box(
+                    Modifier.size(30.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Pink bubble with how many are in the cart. Pops in, and the number flips when it changes. */
+@Composable
+private fun CartBadge(count: Int, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = count > 0,
+        enter = scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)),
+        exit = scaleOut() + fadeOut(),
+        modifier = modifier,
+    ) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .shadow(4.dp, CircleShape)
+                .background(MaterialTheme.colorScheme.secondary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedContent(
+                targetState = count,
+                transitionSpec = {
+                    (slideInVertically { -it } + fadeIn()).togetherWith(slideOutVertically { it } + fadeOut())
+                },
+                label = "cartCount",
+            ) { value ->
+                Text(
+                    "$value",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSecondary,
+                )
             }
         }
     }
@@ -205,9 +307,28 @@ private fun CartPanel(
     onClear: () -> Unit,
     onCheckout: () -> Unit,
 ) {
-    Surface(tonalElevation = 3.dp, shadowElevation = 8.dp) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            LazyColumn(Modifier.heightIn(max = 220.dp)) {
+    Surface(
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shadowElevation = 16.dp,
+    ) {
+        // animateContentSize: the panel grows and shrinks smoothly as lines are added or removed
+        Column(Modifier.animateContentSize().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Text(
+                    "Cart · ${state.itemCount} items",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClear) { Text("Clear") }
+            }
+            LazyColumn(Modifier.heightIn(max = 200.dp)) {
                 items(state.cart, key = { "${it.product.id}-${it.isGift}" }) { line ->
                     CartLineRow(
                         name = line.product.name,
@@ -218,15 +339,34 @@ private fun CartPanel(
                         onIncrease = { onIncrease(line) },
                         onDecrease = { onDecrease(line) },
                         onToggleGift = { onToggleGift(line) },
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
-            Text("${state.itemCount} items", style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider(Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
             PriceSummary(state.price)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                OutlinedButton(onClick = onClear) { Text("Clear") }
-                Button(onClick = onCheckout, modifier = Modifier.weight(1f)) { Text("Checkout") }
+            val interaction = remember { MutableInteractionSource() }
+            Button(
+                onClick = onCheckout,
+                interactionSource = interaction,
+                modifier = Modifier
+                    .padding(top = 10.dp)
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .pressBounce(interaction, 0.96f),
+                shape = CircleShape,
+            ) {
+                Text("Checkout", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                AnimatedContent(
+                    targetState = formatRm(state.price.totalSen),
+                    transitionSpec = {
+                        (slideInVertically { -it } + fadeIn()).togetherWith(slideOutVertically { it } + fadeOut())
+                    },
+                    label = "total",
+                ) { total ->
+                    Text(total, style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     }

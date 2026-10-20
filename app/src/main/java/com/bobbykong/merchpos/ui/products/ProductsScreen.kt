@@ -1,5 +1,12 @@
 package com.bobbykong.merchpos.ui.products
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import com.bobbykong.merchpos.ui.components.Pill
+import com.bobbykong.merchpos.ui.components.ProductPicture
 import android.content.ActivityNotFoundException
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -50,7 +57,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -152,6 +158,9 @@ fun ProductsScreen(
                     }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+                shape = CircleShape,
             ) {
                 Icon(Icons.Filled.Add, contentDescription = if (tab == 0) "Add product" else "Add bundle")
             }
@@ -201,7 +210,6 @@ private fun ProductsWithSidebar(
     }
     Row(Modifier.fillMaxSize()) {
         CategorySidebar(products, categories, selected, onSelect, onReorder = onReorderCategories)
-        VerticalDivider()
         ProductList(
             products = if (selected == null) products else products.filter { it.category == selected },
             catalog = catalog,
@@ -252,9 +260,15 @@ private fun ProductList(
         }
         items(order, key = { it.id }) { product ->
             ReorderableItem(reorderState, key = product.id) { dragging ->
+                // Lifts up a little while dragged
+                val lift by animateFloatAsState(if (dragging) 1.03f else 1f, label = "lift")
                 Card(
                     onClick = { onClick(product) },
                     modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = lift
+                            scaleY = lift
+                        }
                         .alpha(if (product.isActive) 1f else 0.5f)
                         .longPressDraggableHandle(
                             onDragStarted = { haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
@@ -263,7 +277,8 @@ private fun ProductList(
                                 onReorder(order.filter { it.category == category }.map { it.id })
                             },
                         ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = if (dragging) 8.dp else 1.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (dragging) 10.dp else 1.dp),
                 ) {
                     ProductRow(product, catalog)
                 }
@@ -275,10 +290,9 @@ private fun ProductList(
 @Composable
 private fun ProductRow(product: Product, catalog: Catalog) {
     ListItem(
-        leadingContent = product.imagePath?.let { path ->
-            { ProductImage(path, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
-        },
-        headlineContent = { Text(product.name) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { ProductPicture(product, Modifier.size(52.dp).clip(MaterialTheme.shapes.small)) },
+        headlineContent = { Text(product.name, style = MaterialTheme.typography.titleSmall) },
         supportingContent = {
             Column {
                 Text(
@@ -296,8 +310,12 @@ private fun ProductRow(product: Product, catalog: Catalog) {
             }
         },
         trailingContent = when {
-            !product.isActive -> ({ Text("Inactive") })
-            product.isMaterial -> ({ Text("Material") })
+            !product.isActive -> ({
+                Pill("Inactive", MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+            })
+            product.isMaterial -> ({
+                Pill("Material", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+            })
             else -> null
         },
     )

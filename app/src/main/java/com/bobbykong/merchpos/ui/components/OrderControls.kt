@@ -1,6 +1,24 @@
 package com.bobbykong.merchpos.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +28,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -25,6 +42,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.bobbykong.merchpos.data.files.ImageStore
 import com.bobbykong.merchpos.data.model.DiscountType
 import com.bobbykong.merchpos.data.model.OrderDiscount
@@ -131,7 +150,7 @@ fun PriceSummary(price: PriceBreakdown, modifier: Modifier = Modifier) {
     }
 }
 
-/** One cart line: name, price, a Gift switch and − qty + buttons. Used by Sell and Edit order. */
+/** One cart line: name, price, a Gift chip and a − qty + stepper. Used by Sell and Edit order. */
 @Composable
 fun CartLineRow(
     name: String,
@@ -142,32 +161,91 @@ fun CartLineRow(
     onIncrease: () -> Unit,
     onDecrease: () -> Unit,
     onToggleGift: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(Modifier.padding(vertical = 2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text(if (isGift) "FREE" else formatRm(unitPriceSen * qty))
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                if (isGift) "Gift, worth ${formatRm(unitPriceSen)} each" else "${formatRm(unitPriceSen)} each",
+                if (isGift) "FREE · worth ${formatRm(unitPriceSen)} each" else formatRm(unitPriceSen * qty),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
+                color = if (isGift) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FilterChip(selected = isGift, onClick = onToggleGift, label = { Text("Gift") })
-            IconButton(onClick = onDecrease) { Text("−", style = MaterialTheme.typography.titleLarge) }
-            Text("$qty", style = MaterialTheme.typography.titleMedium)
-            IconButton(onClick = onIncrease, enabled = canIncrease) { Text("+", style = MaterialTheme.typography.titleLarge) }
         }
+        FilterChip(
+            selected = isGift,
+            onClick = onToggleGift,
+            label = { Text("Gift") },
+            shape = CircleShape,
+            modifier = Modifier.padding(end = 6.dp),
+        )
+        QtyStepper(qty, canIncrease, onIncrease, onDecrease)
+    }
+}
+
+/** − 2 + inside one rounded pill. The number rolls up or down when it changes. */
+@Composable
+fun QtyStepper(qty: Int, canIncrease: Boolean, onIncrease: () -> Unit, onDecrease: () -> Unit) {
+    Row(
+        Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StepButton("−", enabled = true, onClick = onDecrease)
+        AnimatedContent(
+            targetState = qty,
+            transitionSpec = {
+                val up = targetState > initialState
+                (slideInVertically { if (up) it else -it } + fadeIn())
+                    .togetherWith(slideOutVertically { if (up) -it else it } + fadeOut())
+            },
+            label = "qty",
+        ) { value ->
+            Text(
+                "$value",
+                style = MaterialTheme.typography.titleSmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(min = 24.dp),
+            )
+        }
+        StepButton("+", enabled = canIncrease, onClick = onIncrease, filled = true)
+    }
+}
+
+@Composable
+private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit, filled: Boolean = false) {
+    val interaction = remember { MutableInteractionSource() }
+    val colors = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .size(36.dp)
+            .pressBounce(interaction, 0.85f)
+            .padding(3.dp)
+            .clip(CircleShape)
+            .background(if (filled && enabled) colors.secondary else Color.Transparent)
+            .clickable(interactionSource = interaction, indication = ripple(), enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            symbol,
+            style = MaterialTheme.typography.titleMedium,
+            color = when {
+                !enabled -> colors.onSurface.copy(alpha = 0.3f)
+                filled -> colors.onSecondary
+                else -> colors.onSurface
+            },
+        )
     }
 }
 
 @Composable
 fun ProductImage(imagePath: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    // Built once per photo; crossfade = the photo fades in instead of popping
+    val request = remember(imagePath) {
+        ImageRequest.Builder(context).data(ImageStore.file(context, imagePath)).crossfade(true).build()
+    }
     AsyncImage(
-        model = ImageStore.file(context, imagePath),
+        model = request,
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = modifier,

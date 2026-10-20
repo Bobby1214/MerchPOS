@@ -1,6 +1,20 @@
 package com.bobbykong.merchpos.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import com.bobbykong.merchpos.ui.theme.Tint
+import com.bobbykong.merchpos.ui.theme.categoryTint
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -57,11 +71,11 @@ fun CategorySidebar(
         haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
     LazyColumn(
-        modifier = modifier.width(112.dp).fillMaxHeight(),
+        modifier = modifier.width(100.dp).fillMaxHeight(),
         state = listState,
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
-        item(key = 0) { SidebarItem("All", products.size, selected == null) { onSelect(null) } }
+        item(key = 0) { SidebarItem(ALL, products.size, selected == null) { onSelect(null) } }
         items(order, key = { it }) { category ->
             ReorderableItem(reorderState, key = category, enabled = onReorder != null) { dragging ->
                 SidebarItem(
@@ -90,23 +104,48 @@ private fun SidebarItem(
     onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    Column(
+    // "All" uses the main purple; each category has its own pastel
+    val tint = if (label == ALL) Tint(colors.primaryContainer, colors.onPrimaryContainer) else categoryTint(label)
+    val active = selected || dragging
+    val background by animateColorAsState(if (active) tint.container else Color.Transparent, label = "sidebarBg")
+    val scale by animateFloatAsState(
+        if (dragging) 1.06f else 1f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "sidebarScale",
+    )
+    Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-            .shadow(if (dragging) 6.dp else 0.dp, RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected || dragging) colors.secondaryContainer else colors.surface)
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(if (dragging) 8.dp else 0.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
             .selectable(selected = selected, onClick = onClick, role = Role.Tab)
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .padding(start = 8.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (selected) colors.onSecondaryContainer else colors.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text("$count", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        // Coloured dot: the same colour as the product placeholders of this category
+        Box(Modifier.size(8.dp).clip(CircleShape).background(if (active) tint.content else tint.container))
+        Spacer(Modifier.width(6.dp))
+        Column {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (active) tint.content else colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (active) tint.content.copy(alpha = 0.7f) else colors.onSurfaceVariant,
+            )
+        }
     }
 }
+
+private const val ALL = "All"

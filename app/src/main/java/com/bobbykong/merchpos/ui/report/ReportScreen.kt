@@ -1,5 +1,15 @@
 package com.bobbykong.merchpos.ui.report
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -43,10 +53,21 @@ fun ReportScreen(
         item { EventPicker(events, selected, onPick = viewModel.eventSelection::pick) }
 
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
+            // Colourful hero card, like the promo banner of a shopping app
+            val gradient = Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = Color.White),
+            ) {
+                Column(Modifier.background(gradient).fillMaxWidth().padding(20.dp)) {
                     Text("Total sales", style = MaterialTheme.typography.labelLarge)
-                    Text(formatRm(state.summary.totalSen), style = MaterialTheme.typography.headlineMedium)
+                    AnimatedContent(
+                        targetState = formatRm(state.summary.totalSen),
+                        transitionSpec = { (slideInVertically { it } + fadeIn()).togetherWith(slideOutVertically { -it } + fadeOut()) },
+                        label = "totalSales",
+                    ) { total ->
+                        Text(total, style = MaterialTheme.typography.displaySmall)
+                    }
                     Text("${plural(state.summary.orderCount, "order")} · ${plural(state.itemsSold, "item")} sold")
                     if (state.extras.discountSen > 0) {
                         Text("Discounts & bundles: −${formatRm(state.extras.discountSen)}")
@@ -103,7 +124,11 @@ fun ReportScreen(
 
 @Composable
 private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
             content()

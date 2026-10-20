@@ -2,33 +2,45 @@ package com.bobbykong.merchpos.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import com.bobbykong.merchpos.R
 
-// Set of Material typography styles to start with
+// Nunito: a round, friendly font. One variable font file covers every weight.
+private fun nunito(weight: FontWeight) = Font(
+    R.font.nunito,
+    weight = weight,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight)),
+)
+
+val Nunito = FontFamily(
+    nunito(FontWeight.Normal),
+    nunito(FontWeight.Medium),
+    nunito(FontWeight.SemiBold),
+    nunito(FontWeight.Bold),
+    nunito(FontWeight.ExtraBold),
+)
+
+private val base = Typography()
+
+private fun TextStyle.nunito(weight: FontWeight) = copy(fontFamily = Nunito, fontWeight = weight)
+
 val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
-    )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
+    displayLarge = base.displayLarge.nunito(FontWeight.ExtraBold),
+    displayMedium = base.displayMedium.nunito(FontWeight.ExtraBold),
+    displaySmall = base.displaySmall.nunito(FontWeight.ExtraBold),
+    headlineLarge = base.headlineLarge.nunito(FontWeight.ExtraBold),
+    headlineMedium = base.headlineMedium.nunito(FontWeight.ExtraBold),
+    headlineSmall = base.headlineSmall.nunito(FontWeight.ExtraBold),
+    titleLarge = base.titleLarge.nunito(FontWeight.ExtraBold),
+    titleMedium = base.titleMedium.nunito(FontWeight.Bold),
+    titleSmall = base.titleSmall.nunito(FontWeight.Bold),
+    bodyLarge = base.bodyLarge.nunito(FontWeight.Medium),
+    bodyMedium = base.bodyMedium.nunito(FontWeight.Medium),
+    bodySmall = base.bodySmall.nunito(FontWeight.Medium),
+    labelLarge = base.labelLarge.nunito(FontWeight.Bold),
+    labelMedium = base.labelMedium.nunito(FontWeight.Bold),
+    labelSmall = base.labelSmall.nunito(FontWeight.Bold),
 )

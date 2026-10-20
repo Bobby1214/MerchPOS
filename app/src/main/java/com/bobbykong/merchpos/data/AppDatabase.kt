@@ -6,6 +6,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.bobbykong.merchpos.data.dao.BundleDao
+import com.bobbykong.merchpos.data.dao.CategoryDao
 import com.bobbykong.merchpos.data.dao.EventDao
 import com.bobbykong.merchpos.data.dao.OrderDao
 import com.bobbykong.merchpos.data.dao.ProductDao
@@ -14,6 +15,7 @@ import com.bobbykong.merchpos.data.dao.ReportDao
 import com.bobbykong.merchpos.data.dao.StockMovementDao
 import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.BundleProduct
+import com.bobbykong.merchpos.data.model.Category
 import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.Order
 import com.bobbykong.merchpos.data.model.OrderItem
@@ -24,14 +26,19 @@ import com.bobbykong.merchpos.data.model.StockMovement
 @Database(
     entities = [
         Event::class, Product::class, Order::class, OrderItem::class, StockMovement::class, BundleDeal::class,
-        BundleProduct::class, ProductPart::class,
+        BundleProduct::class, ProductPart::class, Category::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
     // Room writes these migrations from the saved schemas.
     // v2: bundles table + discount columns. v3: bundle type + bundle_products link table.
-    // v4: product_parts (sets, cheki film) + products.is_material.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
+    // v4: product_parts (sets, cheki film) + products.is_material. v5: drag order (products.sort_order + categories).
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
+    ],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
@@ -41,6 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun reportDao(): ReportDao
     abstract fun bundleDao(): BundleDao
     abstract fun productPartDao(): ProductPartDao
+    abstract fun categoryDao(): CategoryDao
 
     companion object {
         const val DB_NAME = "merchpos.db"

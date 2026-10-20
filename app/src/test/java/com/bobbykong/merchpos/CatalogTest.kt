@@ -1,5 +1,6 @@
 package com.bobbykong.merchpos
 
+import com.bobbykong.merchpos.data.model.Category
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.data.model.ProductPart
 import com.bobbykong.merchpos.domain.Catalog
@@ -49,7 +50,7 @@ class CatalogTest {
         assertEquals(0, catalog.canMake(5, left))
         assertEquals(0, catalog.canMake(6, left))
         // Materials aren't sold, sets are
-        assertEquals(listOf(1, 2, 3, 5, 6), catalog.sellable.map { it.id })
+        assertEquals(listOf(5, 6, 1, 2, 3), catalog.sellable.map { it.id }) // Cheki, Poster, Set (A→Z, no order saved)
     }
 
     @Test
@@ -84,5 +85,21 @@ class CatalogTest {
         assertEquals(ProductKind.MATERIAL, ProductForm.from(film, catalog).kind)
         val material = ProductForm(name = "Film", category = "Material", stock = "10", kind = ProductKind.MATERIAL)
         assertNull(material.validate()) // price optional
+    }
+
+    @Test
+    fun productsFollowCategoryOrderThenDraggedOrder() {
+        val c = Catalog(
+            listOf(
+                Product(id = 1, name = "Zed", category = "Badge", priceSen = 1, stockQty = 1, sortOrder = 0),
+                Product(id = 2, name = "Amy", category = "Badge", priceSen = 1, stockQty = 1, sortOrder = 1),
+                Product(id = 3, name = "Poster", category = "Print", priceSen = 1, stockQty = 1),
+                Product(id = 4, name = "Film", category = "Material", priceSen = 1, stockQty = 1),
+            ),
+            categoryOrder = listOf(Category("Print", 0), Category("Badge", 1)),
+        )
+        // Print first (dragged to top), Badge in dragged order (Zed before Amy), Material has no place → last
+        assertEquals(listOf(3, 1, 2, 4), c.products.map { it.id })
+        assertEquals(listOf("Print", "Badge", "Material"), c.categoriesOf())
     }
 }

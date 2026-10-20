@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -62,7 +64,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -81,6 +85,8 @@ import com.bobbykong.merchpos.ui.components.ProductImage
 import com.bobbykong.merchpos.ui.components.StockLabel
 import com.bobbykong.merchpos.util.formatRm
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,7 +106,7 @@ fun ProductsScreen(
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var showBundleForm by remember { mutableStateOf(false) }
     var editingBundle by remember { mutableStateOf<BundleWithProducts?>(null) }
-    val categories = products.map { it.category }.distinct().sorted()
+    val categories = catalog.categoriesOf(products)
 
     LaunchedEffect(message) {
         message?.let {
@@ -126,6 +132,8 @@ fun ProductsScreen(
                         editingProduct = it
                         showProductForm = true
                     },
+                    onReorderProducts = viewModel::reorderProducts,
+                    onReorderCategories = viewModel::reorderCategories,
                 )
             } else {
                 BundleList(bundles, onClick = {
@@ -184,62 +192,115 @@ private fun ProductsWithSidebar(
     selected: String?,
     onSelect: (String?) -> Unit,
     onClick: (Product) -> Unit,
+    onReorderProducts: (List<Int>) -> Unit,
+    onReorderCategories: (List<String>) -> Unit,
 ) {
     if (products.isEmpty()) {
         EmptyText("No products yet. Tap + to add your first item.")
         return
     }
     Row(Modifier.fillMaxSize()) {
-        CategorySidebar(products, categories, selected, onSelect)
+        CategorySidebar(products, categories, selected, onSelect, onReorder = onReorderCategories)
         VerticalDivider()
         ProductList(
             products = if (selected == null) products else products.filter { it.category == selected },
             catalog = catalog,
             onClick = onClick,
+            onReorder = onReorderProducts,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
+/** Hold a card and drag it to move it. Only inside its own category; the order is saved on drop. */
 @Composable
-private fun ProductList(products: List<Product>, catalog: Catalog, onClick: (Product) -> Unit, modifier: Modifier = Modifier) {
+private fun ProductList(
+    products: List<Product>,
+    catalog: Catalog,
+    onClick: (Product) -> Unit,
+    onReorder: (List<Int>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var order by remember(products) { mutableStateOf(products) }
+    val haptics = LocalHapticFeedback.current
+    val listState = rememberLazyListState()
+    // Same fix as Sell: show the top after switching category
+    LaunchedEffect(products.firstOrNull()?.category, products.size) { listState.scrollToItem(0) }
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        val fromIndex = order.indexOfFirst { it.id == from.key }
+        val toIndex = order.indexOfFirst { it.id == to.key }
+        // Products only move inside their category (categories are moved in the sidebar)
+        if (fromIndex < 0 || toIndex < 0 || order[fromIndex].category != order[toIndex].category) {
+            return@rememberReorderableLazyListState
+        }
+        order = order.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+    }
+
     LazyColumn(
         modifier = modifier,
+        state = listState,
         contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(products, key = { it.id }) { product ->
-            Card(onClick = { onClick(product) }, modifier = Modifier.alpha(if (product.isActive) 1f else 0.5f)) {
-                ListItem(
-                    leadingContent = product.imagePath?.let { path ->
-                        { ProductImage(path, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
-                    },
-                    headlineContent = { Text(product.name) },
-                    supportingContent = {
-                        Column {
-                            Text(
-                                if (product.isMaterial) "${product.category} · not sold"
-                                else "${product.category} · ${formatRm(product.priceSen)}"
-                            )
-                            val parts = catalog.partsOf(product.id)
-                            if (parts.isNotEmpty()) {
-                                Text(
-                                    "Made of " + parts.joinToString { "${catalog.nameOf(it.partId)} ×${it.qty}" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                            StockLabel(product, setLabel = parts.isNotEmpty())
-                        }
-                    },
-                    trailingContent = when {
-                        !product.isActive -> ({ Text("Inactive") })
-                        product.isMaterial -> ({ Text("Material") })
-                        else -> null
-                    },
-                )
+        item(key = "hint") {
+            Text(
+                "Hold and drag to change the order. Sell shows the same order.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        items(order, key = { it.id }) { product ->
+            ReorderableItem(reorderState, key = product.id) { dragging ->
+                Card(
+                    onClick = { onClick(product) },
+                    modifier = Modifier
+                        .alpha(if (product.isActive) 1f else 0.5f)
+                        .longPressDraggableHandle(
+                            onDragStarted = { haptics.performHapticFeedback(HapticFeedbackType.LongPress) },
+                            onDragStopped = {
+                                val category = order.firstOrNull { it.id == product.id }?.category
+                                onReorder(order.filter { it.category == category }.map { it.id })
+                            },
+                        ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (dragging) 8.dp else 1.dp),
+                ) {
+                    ProductRow(product, catalog)
+                }
             }
         }
     }
+}
+
+@Composable
+private fun ProductRow(product: Product, catalog: Catalog) {
+    ListItem(
+        leadingContent = product.imagePath?.let { path ->
+            { ProductImage(path, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
+        },
+        headlineContent = { Text(product.name) },
+        supportingContent = {
+            Column {
+                Text(
+                    if (product.isMaterial) "${product.category} · not sold"
+                    else "${product.category} · ${formatRm(product.priceSen)}"
+                )
+                val parts = catalog.partsOf(product.id)
+                if (parts.isNotEmpty()) {
+                    Text(
+                        "Made of " + parts.joinToString { "${catalog.nameOf(it.partId)} ×${it.qty}" },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                StockLabel(product, setLabel = parts.isNotEmpty())
+            }
+        },
+        trailingContent = when {
+            !product.isActive -> ({ Text("Inactive") })
+            product.isMaterial -> ({ Text("Material") })
+            else -> null
+        },
+    )
 }
 
 @Composable

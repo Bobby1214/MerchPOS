@@ -34,6 +34,12 @@ interface ProductDao {
     )
     suspend fun deductStock(id: Int, qty: Int): Int
 
+    @Query("SELECT COALESCE(MAX(sort_order), -1) FROM products WHERE category = :category")
+    suspend fun maxSortOrder(category: String): Int
+
+    @Query("UPDATE products SET sort_order = :sortOrder WHERE id = :id")
+    suspend fun setSortOrder(id: Int, sortOrder: Int)
+
     @Query("DELETE FROM products WHERE id = :id")
     suspend fun delete(id: Int)
 

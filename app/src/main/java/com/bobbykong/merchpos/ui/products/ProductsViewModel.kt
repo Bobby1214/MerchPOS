@@ -136,6 +136,14 @@ class ProductsViewModel(
         return null
     }
 
+    fun reorderProducts(ids: List<Int>) {
+        viewModelScope.launch { repository.reorderProducts(ids) }
+    }
+
+    fun reorderCategories(names: List<String>) {
+        viewModelScope.launch { repository.reorderCategories(names) }
+    }
+
     fun deleteBundle(bundle: BundleDeal) {
         viewModelScope.launch { repository.deleteBundle(bundle) }
     }

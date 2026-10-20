@@ -352,4 +352,21 @@ class PosRepositoryTest {
         repo.deleteEvent(eventId)
         assertEquals(5, stockOf(film))
     }
+
+    @Test
+    fun dragOrderIsSavedAndNewItemsGoLast() = runBlocking {
+        val a = repo.addProduct("A", "Badge", 100, 1)
+        val b = repo.addProduct("B", "Badge", 100, 1)
+        val p = repo.addProduct("P", "Print", 100, 1)
+        // Added in this order: Badge then Print
+        assertEquals(listOf(a, b, p), repo.allProducts.first().map { it.id })
+
+        repo.reorderProducts(listOf(b, a))
+        repo.reorderCategories(listOf("Print", "Badge"))
+        assertEquals(listOf(p, b, a), repo.allProducts.first().map { it.id })
+
+        val c = repo.addProduct("C", "Badge", 100, 1)
+        val k = repo.addProduct("K", "Keychain", 100, 1)
+        assertEquals(listOf(p, b, a, c, k), repo.allProducts.first().map { it.id })
+    }
 }

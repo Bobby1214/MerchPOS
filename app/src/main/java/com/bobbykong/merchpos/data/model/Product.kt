@@ -20,6 +20,15 @@ data class Product(
     @ColumnInfo(name = "is_active") val isActive: Boolean = true,
     // Material (e.g. Instax film): has stock, is used by other products, but isn't sold on its own
     @ColumnInfo(name = "is_material", defaultValue = "0") val isMaterial: Boolean = false,
+    // Position inside its category (you drag to change it). Sell shows the same order.
+    @ColumnInfo(name = "sort_order", defaultValue = "0") val sortOrder: Int = 0,
+)
+
+/** The order of the categories in the sidebar. A category with no row here goes last, A→Z. */
+@Entity(tableName = "categories")
+data class Category(
+    @PrimaryKey val name: String,
+    @ColumnInfo(name = "sort_order") val sortOrder: Int,
 )
 
 /**

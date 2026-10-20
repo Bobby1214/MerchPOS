@@ -1,5 +1,6 @@
 package com.bobbykong.merchpos.domain
 
+import com.bobbykong.merchpos.data.model.Category
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.data.model.ProductPart
 
@@ -11,7 +12,11 @@ import com.bobbykong.merchpos.data.model.ProductPart
  * - A product WITH parts (a set, a cheki) has none. "How many can I make" is worked out from its parts.
  *   It's never stored: it would go stale every time a part is sold on its own (a derived attribute).
  */
-class Catalog(storedProducts: List<Product> = emptyList(), partRows: List<ProductPart> = emptyList()) {
+class Catalog(
+    storedProducts: List<Product> = emptyList(),
+    partRows: List<ProductPart> = emptyList(),
+    categoryOrder: List<Category> = emptyList(),
+) {
     val parts: Map<Int, List<ProductPart>> = partRows.groupBy { it.productId }
 
     private val storedById = storedProducts.associateBy { it.id }
@@ -21,10 +26,24 @@ class Catalog(storedProducts: List<Product> = emptyList(), partRows: List<Produc
         .filter { !hasParts(it.id) }
         .associate { it.id to if (it.isActive) it.stockQty else 0 }
 
-    /** Every product. For one with parts, stockQty = how many can be made right now. */
-    val products: List<Product> = storedProducts.map { p ->
-        if (hasParts(p.id)) p.copy(stockQty = canMake(p.id)) else p
-    }
+    private val categoryRank = categoryOrder.associate { it.name to it.sortOrder }
+
+    /**
+     * Every product, in the order you dragged them: by category order, then by position inside the category.
+     * For one with parts, stockQty = how many can be made right now.
+     */
+    val products: List<Product> = storedProducts
+        .map { p -> if (hasParts(p.id)) p.copy(stockQty = canMake(p.id)) else p }
+        .sortedWith(
+            // Categories without a saved place go last, A→Z
+            compareBy<Product> { categoryRank[it.category] ?: Int.MAX_VALUE }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.category }
+                .thenBy { it.sortOrder }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+        )
+
+    /** Category names of [list] in sidebar order. */
+    fun categoriesOf(list: List<Product> = products): List<String> = list.map { it.category }.distinct()
 
     /** What the Sell screen shows: active, and not a material. */
     val sellable: List<Product> get() = products.filter { it.isActive && !it.isMaterial }

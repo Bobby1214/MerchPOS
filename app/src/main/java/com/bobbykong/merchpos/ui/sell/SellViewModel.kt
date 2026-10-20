@@ -73,7 +73,7 @@ class SellViewModel(private val repository: PosRepository) : ViewModel() {
         ) { event, catalog, bundles, cart, category ->
             val products = catalog.sellable
             val byId = products.associateBy { it.id }
-            val categories = products.map { it.category }.distinct().sorted()
+            val categories = catalog.categoriesOf(products)
             // Drop deactivated products, and never show more than is in stock (paid + gift together).
             // Stock is shared: 2 cheki types use the same film, a set uses the same posters as single sales.
             val taken = mutableMapOf<Int, Int>()

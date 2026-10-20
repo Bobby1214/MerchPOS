@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -106,6 +107,10 @@ fun SellScreen(
                 Text("No products yet. Add some in the Products tab.", textAlign = TextAlign.Center)
             }
         } else {
+            val gridState = rememberLazyGridState()
+            // Start at the top when the category or the order changes.
+            // Otherwise the grid keeps the old first item in view and items moved above it are hidden.
+            LaunchedEffect(state.selectedCategory, state.visibleProducts.map { it.id }) { gridState.scrollToItem(0) }
             Row(Modifier.weight(1f)) {
                 CategorySidebar(
                     products = state.products,
@@ -117,6 +122,7 @@ fun SellScreen(
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(128.dp),
                     modifier = Modifier.weight(1f),
+                    state = gridState,
                     contentPadding = PaddingValues(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),

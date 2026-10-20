@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.BundleProduct
 import com.bobbykong.merchpos.data.model.BundleType
+import com.bobbykong.merchpos.data.model.Category
 import com.bobbykong.merchpos.data.model.Event
 import com.bobbykong.merchpos.data.model.MovementReason
 import com.bobbykong.merchpos.data.model.Order
@@ -41,13 +42,16 @@ class PosRepository(
     private val reportDao = db.reportDao()
     private val bundleDao = db.bundleDao()
     private val partDao = db.productPartDao()
+    private val categoryDao = db.categoryDao()
 
     /** Products + parts. Sets and cheki show how many can be made from their parts. */
-    val catalog = combine(productDao.observeAll(), partDao.observeAll()) { products, parts -> Catalog(products, parts) }
+    val catalog = combine(productDao.observeAll(), partDao.observeAll(), categoryDao.observeAll()) { products, parts, categories ->
+        Catalog(products, parts, categories)
+    }
     val allProducts = catalog.map { it.products }
     /** Products that hold real stock (for the stock report). Sets are left out: their stock is their parts. */
     val activeProducts = catalog.map { c ->
-        c.products.filter { it.isActive && !c.hasParts(it.id) }.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, Product::category).thenBy(String.CASE_INSENSITIVE_ORDER, Product::name))
+        c.products.filter { it.isActive && !c.hasParts(it.id) }
     }
     val events = eventDao.observeAll()
     val openEvent = eventDao.observeOpen()
@@ -112,6 +116,7 @@ class PosRepository(
     ): Int = db.withTransaction {
         loadCatalog().partsError(0, isMaterial, parts)?.let { throw PosException(it) }
         val stock = if (parts.isEmpty()) stockQty else 0
+        placeCategory(category)
         val id = productDao.insert(
             Product(
                 name = name,
@@ -120,6 +125,8 @@ class PosRepository(
                 stockQty = stock,
                 imagePath = imagePath,
                 isMaterial = isMaterial,
+                // New products go at the end of their category
+                sortOrder = productDao.maxSortOrder(category) + 1,
             )
         ).toInt()
         partDao.insertAll(parts.map { (partId, qty) -> ProductPart(productId = id, partId = partId, qty = qty) })
@@ -144,7 +151,10 @@ class PosRepository(
         val newStock =
             if (newParts.isNotEmpty()) current.stockQty
             else (current.stockQty + edited.stockQty - stockBefore).coerceAtLeast(0)
-        productDao.update(edited.copy(stockQty = newStock))
+        placeCategory(edited.category)
+        // Moved to another category: put it at the end there
+        val sortOrder = if (edited.category == current.category) edited.sortOrder else productDao.maxSortOrder(edited.category) + 1
+        productDao.update(edited.copy(stockQty = newStock, sortOrder = sortOrder))
         if (parts != null) {
             partDao.clearFor(edited.id)
             partDao.insertAll(parts.map { (partId, qty) -> ProductPart(productId = edited.id, partId = partId, qty = qty) })
@@ -155,6 +165,21 @@ class PosRepository(
                 StockMovement(productId = edited.id, changeQty = change, reason = MovementReason.ADJUST, createdAt = clock())
             )
         }
+    }
+
+    /** Saves the dragged order of products ([ids] = one category, top to bottom). */
+    suspend fun reorderProducts(ids: List<Int>) = db.withTransaction {
+        ids.forEachIndexed { index, id -> productDao.setSortOrder(id, index) }
+    }
+
+    /** Saves the dragged order of the sidebar categories. */
+    suspend fun reorderCategories(names: List<String>) {
+        categoryDao.upsertAll(names.mapIndexed { index, name -> Category(name, index) })
+    }
+
+    /** A new category gets a place at the end of the sidebar. */
+    private suspend fun placeCategory(name: String) {
+        categoryDao.insertIgnore(Category(name, categoryDao.maxOrder() + 1))
     }
 
     suspend fun orderCountForProduct(productId: Int) = orderDao.countOrdersWithProduct(productId)
@@ -348,7 +373,7 @@ class PosRepository(
         )
     }
 
-    private suspend fun loadCatalog() = Catalog(productDao.getAll(), partDao.getAll())
+    private suspend fun loadCatalog() = Catalog(productDao.getAll(), partDao.getAll(), categoryDao.getAll())
 
     private suspend fun loadProducts(ids: Collection<Int>): Map<Int, Product> =
         ids.distinct().associateWith { productDao.getById(it) ?: throw PosException("Product not found") }

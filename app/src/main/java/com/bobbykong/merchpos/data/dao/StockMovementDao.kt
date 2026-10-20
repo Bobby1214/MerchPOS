@@ -13,6 +13,9 @@ interface StockMovementDao {
     @Insert
     suspend fun insertAll(movements: List<StockMovement>)
 
+    @Query("DELETE FROM stock_movements WHERE product_id = :productId")
+    suspend fun deleteForProduct(productId: Int)
+
     @Query("SELECT * FROM stock_movements WHERE product_id = :productId ORDER BY created_at, id")
     suspend fun getForProduct(productId: Int): List<StockMovement>
 }

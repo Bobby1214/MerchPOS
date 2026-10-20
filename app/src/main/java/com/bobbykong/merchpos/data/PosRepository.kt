@@ -118,6 +118,22 @@ class PosRepository(
         }
     }
 
+    suspend fun orderCountForProduct(productId: Int) = orderDao.countOrdersWithProduct(productId)
+
+    /**
+     * Hard-deletes a product that was NEVER sold, with its stock history.
+     * Your rule: a product in any order is never deleted (old orders need it), so this throws instead.
+     */
+    suspend fun deleteProduct(productId: Int) = db.withTransaction {
+        val product = productDao.getById(productId) ?: return@withTransaction
+        val orders = orderDao.countOrdersWithProduct(productId)
+        if (orders > 0) {
+            throw PosException("${product.name} is in $orders order(s), so it can't be deleted. Deactivate it instead.")
+        }
+        movementDao.deleteForProduct(productId)
+        productDao.delete(productId)
+    }
+
     suspend fun saveBundle(bundle: BundleDeal) {
         if (bundle.id == 0) bundleDao.insert(bundle) else bundleDao.update(bundle)
     }

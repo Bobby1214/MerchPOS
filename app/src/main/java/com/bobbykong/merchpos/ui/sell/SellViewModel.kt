@@ -71,7 +71,7 @@ class SellViewModel(private val repository: PosRepository) : ViewModel() {
             category,
         ) { event, products, bundles, cart, category ->
             val byId = products.associateBy { it.id }
-            val categories = products.map { it.category }.distinct()
+            val categories = products.map { it.category }.distinct().sorted()
             // Drop deactivated products, and never show more than is in stock (paid + gift together)
             val left = mutableMapOf<Int, Int>()
             val lines = cart.mapNotNull { (key, qty) ->

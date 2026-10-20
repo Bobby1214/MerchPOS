@@ -251,4 +251,26 @@ class PosRepositoryTest {
         assertEquals(0, rows[1].lineTotalSen)
         assertTrue(rows[1].isGift)
     }
+
+    @Test
+    fun deleteProductOnlyWhenNeverSold() = runBlocking {
+        val eventId = repo.startEvent("Practice run")
+        val unsold = repo.addProduct("Typo product", "Badge", 800, 5)
+        val sold = repo.addProduct("Badge", "Badge", 800, 10)
+        repo.checkout(listOf(CartItem(sold, 1)), PaymentMethod.CASH)
+
+        repo.deleteProduct(unsold)
+        assertEquals(null, db.productDao().getById(unsold))
+        assertTrue(db.stockMovementDao().getForProduct(unsold).isEmpty())
+
+        // Sold, even if the order is cancelled: old orders still point to it
+        assertEquals(1, repo.orderCountForProduct(sold))
+        assertFails { repo.deleteProduct(sold) }
+        assertEquals(9, stockOf(sold))
+
+        // Once the event and its orders are deleted, it was never sold any more
+        repo.deleteEvent(eventId)
+        repo.deleteProduct(sold)
+        assertEquals(null, db.productDao().getById(sold))
+    }
 }

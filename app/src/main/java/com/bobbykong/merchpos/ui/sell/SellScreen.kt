@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -23,7 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,6 +31,7 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,9 +40,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -52,9 +51,10 @@ import com.bobbykong.merchpos.data.model.OrderDiscount
 import com.bobbykong.merchpos.data.model.PaymentMethod
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.data.model.isSoldOut
-import com.bobbykong.merchpos.ui.AppViewModelProvider
 import com.bobbykong.merchpos.domain.PriceBreakdown
+import com.bobbykong.merchpos.ui.AppViewModelProvider
 import com.bobbykong.merchpos.ui.components.CartLineRow
+import com.bobbykong.merchpos.ui.components.CategorySidebar
 import com.bobbykong.merchpos.ui.components.DiscountInput
 import com.bobbykong.merchpos.ui.components.DiscountPicker
 import com.bobbykong.merchpos.ui.components.PaymentPicker
@@ -101,42 +101,29 @@ fun SellScreen(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
-        if (state.categories.size > 1) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    FilterChip(
-                        selected = state.selectedCategory == null,
-                        onClick = { viewModel.selectCategory(null) },
-                        label = { Text("All") },
-                    )
-                }
-                items(state.categories) { category ->
-                    FilterChip(
-                        selected = state.selectedCategory == category,
-                        onClick = { viewModel.selectCategory(category) },
-                        label = { Text(category) },
-                    )
-                }
-            }
-        }
-
         if (state.products.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 Text("No products yet. Add some in the Products tab.", textAlign = TextAlign.Center)
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(state.visibleProducts, key = { it.id }) { product ->
-                    ProductTile(product, inCart = state.qtyInCart(product.id), onClick = { viewModel.add(product) })
+            Row(Modifier.weight(1f)) {
+                CategorySidebar(
+                    products = state.products,
+                    categories = state.categories,
+                    selected = state.selectedCategory,
+                    onSelect = viewModel::selectCategory,
+                )
+                VerticalDivider()
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(128.dp),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.visibleProducts, key = { it.id }) { product ->
+                        ProductTile(product, inCart = state.qtyInCart(product.id), onClick = { viewModel.add(product) })
+                    }
                 }
             }
         }

@@ -64,7 +64,7 @@ fun MerchPosRoot() {
         val modifier = Modifier.padding(innerPadding).fillMaxSize()
         when (tab) {
             Tab.SELL -> SellScreen(snackbarHostState, modifier)
-            Tab.PRODUCTS -> ProductsScreen(modifier)
+            Tab.PRODUCTS -> ProductsScreen(snackbarHostState, modifier)
             Tab.ORDERS -> OrdersScreen(snackbarHostState, modifier)
             Tab.REPORT -> ReportScreen(modifier)
             Tab.EVENTS -> EventsScreen(snackbarHostState, modifier)

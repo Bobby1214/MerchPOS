@@ -31,6 +31,9 @@ interface ProductDao {
     )
     suspend fun deductStock(id: Int, qty: Int): Int
 
+    @Query("DELETE FROM products WHERE id = :id")
+    suspend fun delete(id: Int)
+
     @Query("UPDATE products SET stock_qty = stock_qty + :qty WHERE id = :id")
     suspend fun addStock(id: Int, qty: Int): Int
 }

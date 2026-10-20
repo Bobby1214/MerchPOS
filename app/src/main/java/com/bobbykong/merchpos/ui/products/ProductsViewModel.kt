@@ -4,16 +4,22 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bobbykong.merchpos.data.PosException
 import com.bobbykong.merchpos.data.PosRepository
 import com.bobbykong.merchpos.data.files.ImageStore
 import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.Product
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** The product the user wants to delete, and how many orders it's in (0 = can be deleted). */
+data class PendingProductDelete(val product: Product, val orderCount: Int)
 
 class ProductsViewModel(
     private val repository: PosRepository,
@@ -24,6 +30,50 @@ class ProductsViewModel(
         repository.allProducts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val bundles: StateFlow<List<BundleDeal>> =
         repository.allBundles.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _pendingDelete = MutableStateFlow<PendingProductDelete?>(null)
+    val pendingDelete: StateFlow<PendingProductDelete?> = _pendingDelete.asStateFlow()
+
+    private val _message = MutableStateFlow<String?>(null)
+    val message: StateFlow<String?> = _message.asStateFlow()
+
+    /** Step 1: check whether it was ever sold, so the dialog can offer Delete or Deactivate. */
+    fun requestDelete(product: Product) {
+        viewModelScope.launch {
+            _pendingDelete.value = PendingProductDelete(product, repository.orderCountForProduct(product.id))
+        }
+    }
+
+    fun dismissDelete() {
+        _pendingDelete.value = null
+    }
+
+    fun confirmDelete() {
+        val product = _pendingDelete.value?.product ?: return
+        _pendingDelete.value = null
+        viewModelScope.launch {
+            try {
+                repository.deleteProduct(product.id)
+                ImageStore.delete(app, product.imagePath)
+                _message.value = "Deleted ${product.name}"
+            } catch (e: PosException) {
+                _message.value = e.message
+            }
+        }
+    }
+
+    fun deactivateInstead() {
+        val product = _pendingDelete.value?.product ?: return
+        _pendingDelete.value = null
+        viewModelScope.launch {
+            repository.updateProduct(product.copy(isActive = false), stockBefore = product.stockQty)
+            _message.value = "${product.name} deactivated"
+        }
+    }
+
+    fun messageShown() {
+        _message.value = null
+    }
 
     /** Saves a new product ([original] = null) or an edit. Returns an error message, or null on success. */
     fun save(original: Product?, form: ProductForm): String? {

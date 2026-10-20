@@ -26,6 +26,9 @@ interface OrderDao {
     @Query("SELECT * FROM orders WHERE event_id = :eventId")
     suspend fun getForEvent(eventId: Int): List<Order>
 
+    @Query("SELECT COUNT(DISTINCT order_id) FROM order_items WHERE product_id = :productId")
+    suspend fun countOrdersWithProduct(productId: Int): Int
+
     @Query("SELECT COUNT(*) FROM orders WHERE event_id = :eventId")
     suspend fun countForEvent(eventId: Int): Int
 

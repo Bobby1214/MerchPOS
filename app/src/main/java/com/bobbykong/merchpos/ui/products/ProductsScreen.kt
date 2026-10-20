@@ -33,12 +33,15 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +63,7 @@ import com.bobbykong.merchpos.data.files.ImageStore
 import com.bobbykong.merchpos.data.model.BundleDeal
 import com.bobbykong.merchpos.data.model.Product
 import com.bobbykong.merchpos.ui.AppViewModelProvider
+import com.bobbykong.merchpos.ui.components.CategorySidebar
 import com.bobbykong.merchpos.ui.components.ProductImage
 import com.bobbykong.merchpos.ui.components.StockLabel
 import com.bobbykong.merchpos.util.formatRm
@@ -68,17 +72,28 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductsScreen(
+    snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
     viewModel: ProductsViewModel = viewModel(factory = AppViewModelProvider.Factory),
 ) {
     val products by viewModel.products.collectAsStateWithLifecycle()
     val bundles by viewModel.bundles.collectAsStateWithLifecycle()
+    val pendingDelete by viewModel.pendingDelete.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
     var showProductForm by remember { mutableStateOf(false) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var showBundleForm by remember { mutableStateOf(false) }
     var editingBundle by remember { mutableStateOf<BundleDeal?>(null) }
     val categories = products.map { it.category }.distinct().sorted()
+
+    LaunchedEffect(message) {
+        message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.messageShown()
+        }
+    }
 
     Column(modifier) {
         PrimaryTabRow(selectedTabIndex = tab) {
@@ -87,10 +102,16 @@ fun ProductsScreen(
         }
         Box(Modifier.fillMaxSize()) {
             if (tab == 0) {
-                ProductList(products, onClick = {
-                    editingProduct = it
-                    showProductForm = true
-                })
+                ProductsWithSidebar(
+                    products = products,
+                    categories = categories,
+                    selected = selectedCategory?.takeIf { it in categories },
+                    onSelect = { selectedCategory = it },
+                    onClick = {
+                        editingProduct = it
+                        showProductForm = true
+                    },
+                )
             } else {
                 BundleList(bundles, onClick = {
                     editingBundle = it
@@ -122,8 +143,10 @@ fun ProductsScreen(
             onSave = { form -> viewModel.save(editingProduct, form) },
             onImportImage = viewModel::importImage,
             onDiscardImage = viewModel::discardImage,
+            onDelete = viewModel::requestDelete,
         )
     }
+    pendingDelete?.let { DeleteProductDialog(it, viewModel) }
     if (showBundleForm) {
         BundleFormDialog(
             original = editingBundle,
@@ -135,21 +158,42 @@ fun ProductsScreen(
     }
 }
 
+/** Category sidebar on the left, products of the chosen category on the right. */
 @Composable
-private fun ProductList(products: List<Product>, onClick: (Product) -> Unit) {
+private fun ProductsWithSidebar(
+    products: List<Product>,
+    categories: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    onClick: (Product) -> Unit,
+) {
     if (products.isEmpty()) {
         EmptyText("No products yet. Tap + to add your first item.")
         return
     }
+    Row(Modifier.fillMaxSize()) {
+        CategorySidebar(products, categories, selected, onSelect)
+        VerticalDivider()
+        ProductList(
+            products = if (selected == null) products else products.filter { it.category == selected },
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun ProductList(products: List<Product>, onClick: (Product) -> Unit, modifier: Modifier = Modifier) {
     LazyColumn(
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 88.dp),
+        modifier = modifier,
+        contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(products, key = { it.id }) { product ->
             Card(onClick = { onClick(product) }, modifier = Modifier.alpha(if (product.isActive) 1f else 0.5f)) {
                 ListItem(
                     leadingContent = product.imagePath?.let { path ->
-                        { ProductImage(path, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))) }
+                        { ProductImage(path, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))) }
                     },
                     headlineContent = { Text(product.name) },
                     supportingContent = {
@@ -209,6 +253,7 @@ private fun ProductFormDialog(
     onSave: (ProductForm) -> String?,
     onImportImage: suspend (Uri) -> String?,
     onDiscardImage: (String?) -> Unit,
+    onDelete: (Product) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -298,6 +343,10 @@ private fun ProductFormDialog(
                         hint = "Inactive products can't be sold. Old orders keep them.",
                         onChange = { form = form.copy(isActive = it) },
                     )
+                    TextButton(onClick = {
+                        dismiss()
+                        onDelete(original)
+                    }) { Text("Delete product", color = MaterialTheme.colorScheme.error) }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
@@ -312,6 +361,37 @@ private fun ProductFormDialog(
             TextButton(onClick = ::dismiss) { Text("Cancel") }
         },
     )
+}
+
+@Composable
+private fun DeleteProductDialog(pending: PendingProductDelete, viewModel: ProductsViewModel) {
+    val name = pending.product.name
+    if (pending.orderCount == 0) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDelete,
+            title = { Text("Delete $name?") },
+            text = { Text("It was never sold, so it can be removed for good. This can't be undone.") },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissDelete) { Text("Keep") } },
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDelete,
+            title = { Text("Can't delete $name") },
+            text = {
+                Text(
+                    "It's in ${pending.orderCount} order(s), and old orders and reports still need it. " +
+                        "Deactivate it instead: it disappears from Sell but stays in your history."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::deactivateInstead, enabled = pending.product.isActive) { Text("Deactivate") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissDelete) { Text("Cancel") } },
+        )
+    }
 }
 
 @Composable
